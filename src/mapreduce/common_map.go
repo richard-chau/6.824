@@ -1,7 +1,11 @@
 package mapreduce
 
 import (
-	"hash/fnv"
+        "hash/fnv"
+        "io/ioutil"
+        "os"
+        "log"
+        "encoding/json"
 )
 
 func doMap(
@@ -31,7 +35,15 @@ func doMap(
 	//
 	// Look at Go's ioutil and os packages for functions to read
 	// and write files.
-	//
+	//// Let's write the code!!!!
+	//// MapFunc(file string, value string) (res []KeyValue)
+	//// mapF func(filename string, contents string) []KeyValue,
+	dat, err := ioutil.ReadFile(inFile)
+	if err != nil {
+		log.Fatal(err)
+	}
+	content := string(dat)
+	res := mapF(inFile, content)
 	// Coming up with a scheme for how to format the key/value pairs on
 	// disk can be tricky, especially when taking into account that both
 	// keys and values could contain newlines, quotes, and any other
@@ -45,7 +57,7 @@ func doMap(
 	// code below. The corresponding decoding functions can be found in
 	// common_reduce.go.
 	//
-	//   enc := json.NewEncoder(file)
+	//   enc := json.NewEncoder(file) //io.writer
 	//   for _, kv := ... {
 	//     err := enc.Encode(&kv)
 	//
@@ -53,6 +65,25 @@ func doMap(
 	//
 	// Your code here (Part I).
 	//
+	////Let's write the code
+	////reduceName(jobName string, mapTask int, reduceTask int) string
+	intermFile := make([]*os.File, nReduce)
+	intermFileEncoder := make([]*json.Encoder, nReduce)
+	for i:=0; i<nReduce; i++ {
+		intermFile[i], _ = os.Create(reduceName(jobName, mapTask, i))
+		intermFileEncoder[i] = json.NewEncoder(intermFile[i])
+	}
+	for _, kv := range(res) {
+		idx := ihash(kv.Key) % nReduce;
+		err := intermFileEncoder[idx].Encode(&kv)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+	for i:=0; i<nReduce; i++ {
+		intermFile[i].Close()
+	}
+	return
 }
 
 func ihash(s string) int {

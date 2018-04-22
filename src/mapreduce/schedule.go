@@ -34,30 +34,30 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 	// Your code here (Part III, Part IV).
 	//
 
-	var workerRPCAddr string
+	//var workerRPCAddr string
 	var wg sync.WaitGroup
 	cnt := 0
 	fmt.Println("sfdfsi%v", ntasks)
 	for ; cnt<ntasks; cnt++ {
 		
 		wg.Add(1)
-		workerRPCAddr = <- registerChan
-		fmt.Println("%s kk", workerRPCAddr)
+		//workerRPCAddr = <- registerChan
+		//fmt.Println("%s kk", workerRPCAddr)
 		tmp := DoTaskArgs{jobName, mapFiles[cnt], phase, cnt, n_other}
-		go func(workerRPCAddr string) {
-			//for {
-				//workerRPCAddr = <- registerChan //put inside, or pass a value. should not use closure, may cause error
-				//fmt.Println("%s kk", workerRPCAddr)
-				call(workerRPCAddr, "Worker.DoTask", &tmp, nil)
+		go func() {
+			for {
+				workerRPCAddr := <- registerChan //put inside, or pass a value. should not use closure, may cause error
+				fmt.Println("%s kk", workerRPCAddr)
+				success := call(workerRPCAddr, "Worker.DoTask", &tmp, nil)
 				defer func(workerRPCAddr string) {
 					registerChan <- workerRPCAddr
 				}(workerRPCAddr)
-				//if success {
-				//	break
-				//}
-			//}
+				if success {
+					break
+				}
+			}
 			wg.Done()
-		}(workerRPCAddr)
+		}()
 		fmt.Println("hahahahahah")
 		//registerChan <- workerRPCAddr
 		

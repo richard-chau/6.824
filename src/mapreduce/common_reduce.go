@@ -6,6 +6,7 @@ import (
         "log"
         //"strconv"
         "encoding/json"
+        "sort"
 	//"fmt"
 )
 
@@ -46,7 +47,7 @@ func doReduce(
 	var kv KeyValue
 
 	//for _, v := range dir_list {  //or use reduceName(jobName, 0, reduceTask)
-        for i:=0; i<nMap; i++ {
+    for i:=0; i<nMap; i++ {
 		intermFile := reduceName(jobName, i, reduceTask)
 	        
 		resFile, _ := os.Open(intermFile)
@@ -63,6 +64,9 @@ func doReduce(
 				mapFile[kv.Key] = []string{kv.Value}
 			}
 		}	
+		for key, _ := range(mapFile) {
+			sort.Strings(mapFile[key])
+		}
 	}
 	////ReduceFunc(key string, values []string) string {
 	////TODO: sort

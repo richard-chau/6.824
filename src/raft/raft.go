@@ -77,6 +77,7 @@ type Raft struct {
 	RequestVoteChan   (chan bool)
 	AppendEntriesChan (chan bool)
 	ElectWin          (chan bool)
+	succeesNum        int
 }
 
 // return currentTerm and whether this server
@@ -160,6 +161,8 @@ type RequestVoteReply struct {
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
 	//DPrintf("In RequestVote: %d%d%d", rf.me, rf.State, rf.CurrentTerm)
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
 
 	//DPrintf("In RequestVote: %d%d", rf.me, rf.CurrentTerm)
 	if args.Term < rf.CurrentTerm {
@@ -178,7 +181,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	reply.CTerm = rf.CurrentTerm
 	reply.VoteGranted = false
 
-	DPrintf("%d(Term: %d), RecvRequestVote from %d(Term: %d)", rf.me, rf.CurrentTerm, args.CandidateId, args.Term)
+	///DPrintf("%d(Term: %d), RecvRequestVote from %d(Term: %d)", rf.me, rf.CurrentTerm, args.CandidateId, args.Term)
 	if rf.VoteFor == -1 || //REM: initialize to -1
 		rf.VoteFor == args.CandidateId { //&&
 		//rf.LastApplied <= args.LastLogIndex {
@@ -223,18 +226,33 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 // the struct itself.
 //
 func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply) bool {
-	DPrintf("SendRequestVote: from %d(Term: %d) to %d", args.CandidateId, args.Term, server)
+	///DPrintf("SendRequestVote: from %d(Term: %d) to %d", args.CandidateId, args.Term, server)
 	ok := rf.peers[server].Call("Raft.RequestVote", args, reply)
+
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
 	if !ok {
 		return ok
 	}
-	if rf.State != 1 || args.Term != rf.CurrentTerm {
+	if rf.State != 0 || args.Term != rf.CurrentTerm { //mistake: rf.State = 1
 		return ok
 	}
 	if reply.CTerm > rf.CurrentTerm {
 		rf.CurrentTerm = reply.CTerm
 		rf.State = -1
 		rf.VoteFor = -1
+		return ok
+	}
+
+	//DPrintf("Leader%d%d%d", rf.me, rf.CurrentTerm, succeesNum)
+	if reply.VoteGranted && rf.State == 0 {
+		rf.succeesNum++
+		if rf.succeesNum > len(rf.peers)/2 {
+			rf.State = 1
+			///DPrintf("LeaderWin: %d, and its Term: %d", rf.me, rf.CurrentTerm)
+			rf.ElectWin <- true
+		}
 	}
 	return ok
 }
@@ -256,7 +274,10 @@ type AppendEntriesReply struct {
 }
 
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
-	DPrintf("%d(Term: %d) RecvAppendEntries from %d(Term: %d)", rf.me, rf.CurrentTerm, args.LeaderId, args.Term)
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
+	///DPrintf("%d(Term: %d) RecvAppendEntries from %d(Term: %d)", rf.me, rf.CurrentTerm, args.LeaderId, args.Term)
 	if args.Term < rf.CurrentTerm {
 		reply.CTerm = rf.CurrentTerm
 		reply.Success = false
@@ -281,8 +302,12 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 }
 
 func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
-	DPrintf("SendAppendEntries from %d(Term: %d) to %d", args.LeaderId, args.Term, server)
+	///DPrintf("SendAppendEntries from %d(Term: %d) to %d", args.LeaderId, args.Term, server)
 	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
+
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
 	if !ok {
 		return ok
 	}
@@ -365,7 +390,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	RaftElectionTimeout := time.Duration(200+rseed1.Intn(200)) * time.Millisecond
 	//RaftElectionTimeout = (300 + time.Duration(rf.me)*50) * time.Millisecond
 	HeartBeatTimeout := 100 * time.Microsecond
-	DPrintf("Waiting:%d%v", rf.me, RaftElectionTimeout)
+	///DPrintf("Waiting:%d%v", rf.me, RaftElectionTimeout)
 	// Your initialization code here (2A, 2B, 2C).
 	//time.Sleep(time.Duration(rseed1.Intn(20)) * time.Millisecond)
 	//time.Sleep(RaftElectionTimeout)
@@ -373,86 +398,92 @@ func Make(peers []*labrpc.ClientEnd, me int,
 		//timeout := time.After(RaftElectionTimeout)
 		for {
 			//DPrintf("%d%d", me, rf.CurrentTerm)
-			if rf.State == -1 { //follwer
-				select {
-				case <-time.After(RaftElectionTimeout):
-					rf.State = 0
-				case <-rf.AppendEntriesChan:
-					continue
-				case <-rf.RequestVoteChan:
-					continue
-					//no default
+			switch rf.State {
+			case -1:
+				{ //follwer
+					select {
+					case <-time.After(RaftElectionTimeout):
+						rf.State = 0
+					case <-rf.AppendEntriesChan:
+						continue
+					case <-rf.RequestVoteChan:
+						continue
+						//no default
+					}
 				}
-			} else if rf.State == 0 {
-				rf.CurrentTerm += 1
-				rf.VoteFor = rf.me
-				//REM: reset the election timer
-				go func() {
-					succeesNum := 1
-					//DPrintf("Leader- %d%d%d", rf.me, rf.CurrentTerm, succeesNum)
-					for i := 0; i < len(rf.peers); i++ {
-						if i != rf.me && rf.State == 0 { //rf.State may be
-							//modified by other case
-							args := &RequestVoteArgs{Term: rf.CurrentTerm,
-								CandidateId:  rf.me,
-								LastLogIndex: rf.LastApplied,
-								LastLogTerm:  0, //rf.Slog[len(rf.Slog)-1].Term,
-							} //REM: Lastxxx
-							reply := &RequestVoteReply{}
-							ok := rf.sendRequestVote(i, args, reply)
-							if ok && reply.VoteGranted == true {
-								succeesNum++
+			case 0:
+				{
+					rf.mu.Lock()
+
+					rf.CurrentTerm += 1
+					rf.VoteFor = rf.me
+					rf.succeesNum = 1
+
+					args := &RequestVoteArgs{Term: rf.CurrentTerm,
+						CandidateId:  rf.me,
+						LastLogIndex: rf.LastApplied,
+						LastLogTerm:  0, //rf.Slog[len(rf.Slog)-1].Term,
+					} //REM: Lastxxx
+					//reply := &RequestVoteReply{} //should pass value instead of reference!!!
+
+					rf.mu.Unlock()
+
+					//REM: reset the election timer
+					go func() {
+						//DPrintf("Leader- %d%d%d", rf.me, rf.CurrentTerm, succeesNum)
+
+						for i := 0; i < len(rf.peers); i++ {
+							if i != rf.me && rf.State == 0 { //rf.State may be
+								//modified by other case
+								go rf.sendRequestVote(i, args, &RequestVoteReply{}) //reply should pass value instead of reference!!!
+
 							}
+						}
 
+					}()
+
+					select {
+					case <-time.After(RaftElectionTimeout): //timeout:
+						continue
+					case <-rf.AppendEntriesChan:
+						rf.State = -1
+					case <-rf.ElectWin:
+						rf.State = 1 //already done at the other routine
+					}
+
+				}
+			case 1:
+				{
+					//quorum := 1 //not tested
+					rf.mu.Lock()
+					args := &AppendEntriesArgs{Term: rf.CurrentTerm,
+						LeaderId:     rf.me,
+						PrevLogIndex: rf.LastApplied,
+						PrevLogTerm:  0,   //rf.Slog[len(rf.Slog)-1].Term,
+						Entries:      nil, //heartbeat empty
+						LeaderCommit: rf.CommitIndex,
+					} //REM: Prevxxx
+					rf.mu.Unlock()
+					for i := 0; i < len(rf.peers); i++ {
+						if i != rf.me && rf.State == 1 { //rf.State may be
+							//modified by other case
+							go rf.sendAppendEntries(i, args, &AppendEntriesReply{})
+							//if ok {
+							//	quorum++
+							//}
 						}
 					}
-					//DPrintf("Leader%d%d%d", rf.me, rf.CurrentTerm, succeesNum)
-					if rf.State == 0 {
-						if succeesNum > len(rf.peers)/2 {
-							rf.State = 1
-							DPrintf("LeaderWin: %d, and its Term: %d", rf.me, rf.CurrentTerm)
-							<-rf.ElectWin
-						}
-					}
-				}()
 
-				select {
-				case <-time.After(RaftElectionTimeout): //timeout:
-					continue
-				case <-rf.AppendEntriesChan:
-					rf.State = -1
-				case <-rf.ElectWin:
-					rf.State = 1 //already done at the other routine
-				}
+					//if quorum <= len(rf.peers)/2 {
+					//	rf.State = 0
+					//}
 
-			} else if rf.State == 1 {
-				quorum := 1
-				for i := 0; i < len(rf.peers); i++ {
-					if i != rf.me && rf.State == 1 { //rf.State may be
-						//modified by other case
-						args := &AppendEntriesArgs{Term: rf.CurrentTerm,
-							LeaderId:     rf.me,
-							PrevLogIndex: rf.LastApplied,
-							PrevLogTerm:  0,   //rf.Slog[len(rf.Slog)-1].Term,
-							Entries:      nil, //heartbeat empty
-							LeaderCommit: rf.CommitIndex,
-						} //REM: Prevxxx
-						reply := &AppendEntriesReply{}
-						ok := rf.sendAppendEntries(i, args, reply)
-						if ok {
-							quorum++
-						}
-					}
+					//no default:
+					//but one more case: in RPC request or response
+					//if T > cT, will set to follower -1 directly
+					//but here  && rf.State == 1  can avoid error
+					time.Sleep(HeartBeatTimeout)
 				}
-
-				if quorum <= len(rf.peers)/2 {
-					rf.State = 0
-				}
-				//no default:
-				//but one more case: in RPC request or response
-				//if T > cT, will set to follower -1 directly
-				//but here  && rf.State == 1  can avoid error
-				time.Sleep(HeartBeatTimeout)
 			}
 		}
 	}()

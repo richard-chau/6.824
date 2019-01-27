@@ -85,6 +85,9 @@ func (rf *Raft) GetState() (int, bool) {
 	var term int
 	var isleader bool
 	// Your code here (2A).
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
 	term = rf.CurrentTerm
 	isleader = (rf.State == 1)
 	return term, isleader

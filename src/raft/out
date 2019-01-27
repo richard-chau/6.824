@@ -1,0 +1,8 @@
+Test (2A): initial election ...
+  ... Passed --   3.8  3 16309    0
+Test (2A): election after network failure ...
+--- FAIL: TestReElection2A (9.94s)
+	config.go:327: expected one leader, got none
+FAIL
+exit status 1
+FAIL	raft	13.792s

@@ -146,7 +146,7 @@ type RequestVoteArgs struct {
 
 //
 // example RequestVote RPC reply structure.
-// field names must start with capital letters!
+// field names must start with capital letters!git
 //
 type RequestVoteReply struct {
 	// Your data here (2A).
@@ -354,9 +354,9 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.Slog = nil //REM:
 	rf.CommitIndex = 0
 	rf.LastApplied = 0
-	rf.RequestVoteChan = make(chan bool, 30)
-	rf.AppendEntriesChan = make(chan bool, 30)
-	rf.ElectWin = make(chan bool, 30)
+	rf.RequestVoteChan = make(chan bool)
+	rf.AppendEntriesChan = make(chan bool)
+	rf.ElectWin = make(chan bool)
 
 	rf.State = -1
 
@@ -387,17 +387,18 @@ func Make(peers []*labrpc.ClientEnd, me int,
 				rf.CurrentTerm += 1
 				rf.VoteFor = rf.me
 				//REM: reset the election timer
+				args := &RequestVoteArgs{Term: rf.CurrentTerm,
+					CandidateId:  rf.me,
+					LastLogIndex: rf.LastApplied,
+					LastLogTerm:  0, //rf.Slog[len(rf.Slog)-1].Term,
+				} //REM: Lastxxx
 				go func() {
 					succeesNum := 1
 					//DPrintf("Leader- %d%d%d", rf.me, rf.CurrentTerm, succeesNum)
 					for i := 0; i < len(rf.peers); i++ {
 						if i != rf.me && rf.State == 0 { //rf.State may be
 							//modified by other case
-							args := &RequestVoteArgs{Term: rf.CurrentTerm,
-								CandidateId:  rf.me,
-								LastLogIndex: rf.LastApplied,
-								LastLogTerm:  0, //rf.Slog[len(rf.Slog)-1].Term,
-							} //REM: Lastxxx
+
 							reply := &RequestVoteReply{}
 							ok := rf.sendRequestVote(i, args, reply)
 							if ok && reply.VoteGranted == true {
@@ -427,16 +428,17 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 			} else if rf.State == 1 {
 				quorum := 1
+				args := &AppendEntriesArgs{Term: rf.CurrentTerm,
+					LeaderId:     rf.me,
+					PrevLogIndex: rf.LastApplied,
+					PrevLogTerm:  0,   //rf.Slog[len(rf.Slog)-1].Term,
+					Entries:      nil, //heartbeat empty
+					LeaderCommit: rf.CommitIndex,
+				} //REM: Prevxxx
 				for i := 0; i < len(rf.peers); i++ {
 					if i != rf.me && rf.State == 1 { //rf.State may be
 						//modified by other case
-						args := &AppendEntriesArgs{Term: rf.CurrentTerm,
-							LeaderId:     rf.me,
-							PrevLogIndex: rf.LastApplied,
-							PrevLogTerm:  0,   //rf.Slog[len(rf.Slog)-1].Term,
-							Entries:      nil, //heartbeat empty
-							LeaderCommit: rf.CommitIndex,
-						} //REM: Prevxxx
+
 						reply := &AppendEntriesReply{}
 						ok := rf.sendAppendEntries(i, args, reply)
 						if ok {

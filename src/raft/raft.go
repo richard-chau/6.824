@@ -181,7 +181,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	reply.CTerm = rf.CurrentTerm
 	reply.VoteGranted = false
 
-	///DPrintf("%d(Term: %d), RecvRequestVote from %d(Term: %d)", rf.me, rf.CurrentTerm, args.CandidateId, args.Term)
+	DPrintf("%d(Term: %d), RecvRequestVote from %d(Term: %d)", rf.me, rf.CurrentTerm, args.CandidateId, args.Term)
 	if rf.VoteFor == -1 || //REM: initialize to -1
 		rf.VoteFor == args.CandidateId { //&&
 		//rf.LastApplied <= args.LastLogIndex {
@@ -226,7 +226,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 // the struct itself.
 //
 func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply) bool {
-	///DPrintf("SendRequestVote: from %d(Term: %d) to %d", args.CandidateId, args.Term, server)
+	DPrintf("SendRequestVote: from %d(Term: %d) to %d", args.CandidateId, args.Term, server)
 	ok := rf.peers[server].Call("Raft.RequestVote", args, reply)
 
 	rf.mu.Lock()
@@ -250,7 +250,7 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 		rf.succeesNum++
 		if rf.succeesNum > len(rf.peers)/2 {
 			rf.State = 1
-			///DPrintf("LeaderWin: %d, and its Term: %d", rf.me, rf.CurrentTerm)
+			DPrintf("LeaderWin: %d, and its Term: %d", rf.me, rf.CurrentTerm)
 			rf.ElectWin <- true
 		}
 	}
@@ -277,7 +277,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	///DPrintf("%d(Term: %d) RecvAppendEntries from %d(Term: %d)", rf.me, rf.CurrentTerm, args.LeaderId, args.Term)
+	DPrintf("%d(Term: %d) RecvAppendEntries from %d(Term: %d)", rf.me, rf.CurrentTerm, args.LeaderId, args.Term)
 	if args.Term < rf.CurrentTerm {
 		reply.CTerm = rf.CurrentTerm
 		reply.Success = false
@@ -302,7 +302,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 }
 
 func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
-	///DPrintf("SendAppendEntries from %d(Term: %d) to %d", args.LeaderId, args.Term, server)
+	DPrintf("SendAppendEntries from %d(Term: %d) to %d", args.LeaderId, args.Term, server)
 	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
 
 	rf.mu.Lock()
@@ -390,7 +390,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	RaftElectionTimeout := time.Duration(200+rseed1.Intn(200)) * time.Millisecond
 	//RaftElectionTimeout = (300 + time.Duration(rf.me)*50) * time.Millisecond
 	HeartBeatTimeout := 100 * time.Microsecond
-	///DPrintf("Waiting:%d%v", rf.me, RaftElectionTimeout)
+	DPrintf("Waiting:%d%v", rf.me, RaftElectionTimeout)
 	// Your initialization code here (2A, 2B, 2C).
 	//time.Sleep(time.Duration(rseed1.Intn(20)) * time.Millisecond)
 	//time.Sleep(RaftElectionTimeout)

@@ -18,6 +18,7 @@ package raft
 //
 
 import (
+	"fmt"
 	"labrpc"
 	"math/rand"
 	"sync"
@@ -78,6 +79,10 @@ type Raft struct {
 	AppendEntriesChan (chan bool)
 	ElectWin          (chan bool)
 	succeesNum        int
+	majorityN         int
+
+	applyCh (chan ApplyMsg)
+	command (interface{})
 }
 
 // return currentTerm and whether this server
@@ -182,9 +187,9 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	reply.VoteGranted = false
 
 	DPrintf("%d(Term: %d), RecvRequestVote from %d(Term: %d)", rf.me, rf.CurrentTerm, args.CandidateId, args.Term)
-	if rf.VoteFor == -1 || //REM: initialize to -1
-		rf.VoteFor == args.CandidateId { //&&
-		//rf.LastApplied <= args.LastLogIndex {
+	if (rf.VoteFor == -1 || //REM: initialize to -1
+		rf.VoteFor == args.CandidateId) &&
+		rf.UpToDate(args.LastLogIndex, args.LastLogTerm) {
 		//if rf.State == 0 || (rf.State == -1 && rf.VoteFor == args.CandidateId) {
 		//reply.CTerm = rf.CurrentTerm
 		reply.VoteGranted = true
@@ -192,8 +197,21 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		rf.RequestVoteChan <- true    //should be only here
 		return                        //should have return
 	}
-
 	return
+}
+
+func (rf *Raft) UpToDate(argIndex int, argTerm int) bool {
+	if len(rf.Slog) == 0 {
+		return true
+	}
+	rfLogTerm := rf.GetLastLogTerm()
+	if argTerm > rfLogTerm { //rf.CurrentTerm
+		return true
+	} else if argTerm == rfLogTerm {
+		return argIndex >= rf.GetLastLogIndex()
+	} else {
+		return false
+	}
 }
 
 //
@@ -292,6 +310,36 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		rf.VoteFor = -1
 	} //all puts before reply.CTerm = rf.CurrentTerm
 
+	if args.PrevLogIndex > len(rf.Slog)-1 ||
+		(args.PrevLogIndex >= 0 &&
+			rf.Slog[args.PrevLogIndex].Term != args.PrevLogTerm) {
+		reply.CTerm = rf.CurrentTerm
+		reply.Success = false
+		return
+	}
+	//fmt.Println(len(rf.Slog), args.PrevLogIndex+1)
+	if len(args.Entries) != 0 &&
+		len(rf.Slog)-1 > args.PrevLogIndex && //entry conflict, first must have the entry. len(rf.Slog) - 1, not len(rf.Slog)
+		args.Entries[0].Term != rf.Slog[args.PrevLogIndex+1].Term {
+		rf.Slog = rf.Slog[:args.PrevLogIndex+1]
+	}
+
+	if len(args.Entries) != 0 {
+		DPrintfB("%d: %vgagaga", rf.me, rf.Slog)
+		rf.Slog = append(rf.Slog, args.Entries...)
+		DPrintfB("%v", rf.Slog)
+	}
+
+	if args.LeaderCommit > rf.CommitIndex {
+		rf.CommitIndex = Min(args.LeaderCommit, rf.GetLastLogIndex())
+		rf.applyCh <- ApplyMsg{Command: rf.Slog[rf.CommitIndex].Command, CommandIndex: rf.CommitIndex, CommandValid: true}
+
+		if rf.LastApplied < rf.CommitIndex {
+			rf.LastApplied = rf.CommitIndex
+		}
+		//REM: incr lastApplied, and apply log to state machine
+	}
+
 	reply.CTerm = rf.CurrentTerm
 	reply.Success = true
 	rf.AppendEntriesChan <- true
@@ -314,11 +362,41 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 	if rf.State != 1 || args.Term != rf.CurrentTerm {
 		return ok
 	}
+
 	if reply.CTerm > rf.CurrentTerm {
 		rf.CurrentTerm = reply.CTerm
 		rf.State = -1
 		rf.VoteFor = -1
+		return ok
 	}
+	DPrintfB("send entries: %d", server)
+
+	if reply.Success == false { //handle log inconsistency.
+		rf.NextIndex[server]--
+		args := &AppendEntriesArgs{Term: rf.CurrentTerm,
+			LeaderId:     rf.me,
+			PrevLogIndex: rf.GetPrevLogIndex(server),
+			PrevLogTerm:  rf.GetPrevLogTerm(server),      //rf.Slog[len(rf.Slog)-1].Term,
+			Entries:      rf.Slog[rf.NextIndex[server]:], //heartbeat empty
+			LeaderCommit: rf.CommitIndex,
+		}
+		DPrintfB("resend entries: %d", server)
+		return rf.sendAppendEntries(server, args, &AppendEntriesReply{})
+	}
+
+	if reply.Success == true && args.Entries != nil { //not simple else
+		rf.NextIndex[server]++
+		rf.MatchIndex[server]++
+
+		if rf.MatchIndex[server] >= len(rf.Slog)-1 {
+			rf.majorityN++
+		}
+		if rf.majorityN > len(rf.peers)/2 {
+			rf.CommitIndex = len(rf.Slog) - 1
+			rf.applyCh <- ApplyMsg{Command: rf.command, CommandIndex: rf.CommitIndex, CommandValid: true}
+		}
+	}
+
 	return ok
 }
 
@@ -342,7 +420,37 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	isLeader := true
 
 	// Your code here (2B).
+	if rf.State != 1 {
+		return -1, rf.CurrentTerm, false
+	}
 
+	rf.command = command
+	//commandInt, _ := command.(int)
+	rf.Slog = append(rf.Slog, SLogEntry{Term: rf.CurrentTerm, Command: command})
+	//REM: respond after entry applied to state machine
+	rf.majorityN = 1
+	index = rf.CommitIndex + 1
+	DPrintfB("Start %d, next index %d", rf.me, index)
+	for i := 0; i < len(rf.peers); i++ {
+		if i != rf.me && rf.State == 1 { //rf.State may be
+			//modified by other case
+			rf.mu.Lock()
+			args := &AppendEntriesArgs{Term: rf.CurrentTerm,
+				LeaderId:     rf.me,
+				PrevLogIndex: rf.GetPrevLogIndex(i),
+				PrevLogTerm:  rf.GetPrevLogTerm(i),      //rf.Slog[len(rf.Slog)-1].Term,
+				Entries:      rf.Slog[rf.NextIndex[i]:], //REM: rf.Slog[rf.NextIndex[i]:], //heartbeat empty
+				LeaderCommit: rf.CommitIndex,
+			} //REM: Prevxxx
+			rf.mu.Unlock()
+			go rf.sendAppendEntries(i, args, &AppendEntriesReply{})
+
+			//select
+		}
+	}
+
+	term = rf.CurrentTerm
+	isLeader = (rf.State == 1)
 	return index, term, isLeader
 }
 
@@ -354,6 +462,38 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 //
 func (rf *Raft) Kill() {
 	// Your code here, if desired.
+}
+
+func Min(a int, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func (rf *Raft) GetLastLogIndex() int {
+	return len(rf.Slog) - 1
+}
+
+func (rf *Raft) GetLastLogTerm() int {
+	tmp := len(rf.Slog) - 1
+	if tmp == -1 {
+		return 0
+	} else {
+		return rf.Slog[tmp].Term
+	}
+}
+
+func (rf *Raft) GetPrevLogIndex(i int) int {
+	return rf.NextIndex[i] - 1
+}
+
+func (rf *Raft) GetPrevLogTerm(i int) int {
+	tmp := rf.NextIndex[i] - 1
+	if tmp == -1 {
+		return 0
+	}
+	return rf.Slog[tmp].Term
 }
 
 //
@@ -373,12 +513,20 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.peers = peers
 	rf.persister = persister
 	rf.me = me
+	rf.applyCh = applyCh
 
 	rf.CurrentTerm = 0
 	rf.VoteFor = -1
-	rf.Slog = nil //REM:
-	rf.CommitIndex = 0
-	rf.LastApplied = 0
+	rf.Slog = []SLogEntry{} //nil //REM:
+	rf.CommitIndex = -1
+	rf.LastApplied = -1
+	//rf.NextIndex = []int{}
+	//rf.MatchIndex = [len(rf.peers)]int{}
+	for i := 0; i < len(rf.peers); i++ {
+		rf.NextIndex = append(rf.NextIndex, 1+rf.GetLastLogIndex())
+		rf.MatchIndex = append(rf.MatchIndex, 0)
+	}
+
 	rf.RequestVoteChan = make(chan bool, 30)
 	rf.AppendEntriesChan = make(chan bool, 30)
 	rf.ElectWin = make(chan bool, 30)
@@ -421,8 +569,8 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 					args := &RequestVoteArgs{Term: rf.CurrentTerm,
 						CandidateId:  rf.me,
-						LastLogIndex: rf.LastApplied,
-						LastLogTerm:  0, //rf.Slog[len(rf.Slog)-1].Term,
+						LastLogIndex: rf.GetLastLogIndex(),
+						LastLogTerm:  rf.GetLastLogTerm(), //rf.Slog[len(rf.Slog)-1].Term,
 					} //REM: Lastxxx
 					//reply := &RequestVoteReply{} //should pass value instead of reference!!!
 
@@ -454,29 +602,25 @@ func Make(peers []*labrpc.ClientEnd, me int,
 				}
 			case 1:
 				{
-					//quorum := 1 //not tested
-					rf.mu.Lock()
-					args := &AppendEntriesArgs{Term: rf.CurrentTerm,
-						LeaderId:     rf.me,
-						PrevLogIndex: rf.LastApplied,
-						PrevLogTerm:  0,   //rf.Slog[len(rf.Slog)-1].Term,
-						Entries:      nil, //heartbeat empty
-						LeaderCommit: rf.CommitIndex,
-					} //REM: Prevxxx
-					rf.mu.Unlock()
 					for i := 0; i < len(rf.peers); i++ {
 						if i != rf.me && rf.State == 1 { //rf.State may be
 							//modified by other case
+							rf.mu.Lock()
+							args := &AppendEntriesArgs{Term: rf.CurrentTerm,
+								LeaderId:     rf.me,
+								PrevLogIndex: rf.GetPrevLogIndex(i),
+								PrevLogTerm:  rf.GetPrevLogTerm(i), //rf.Slog[len(rf.Slog)-1].Term,
+								Entries:      nil,                  //heartbeat empty
+								LeaderCommit: rf.CommitIndex,
+							}
+							fmt.Println(rf.NextIndex[i], len(rf.Slog))
+							if rf.NextIndex[i] <= len(rf.Slog)-1 {
+								args.Entries = rf.Slog[rf.NextIndex[i]:]
+							}
+							rf.mu.Unlock()
 							go rf.sendAppendEntries(i, args, &AppendEntriesReply{})
-							//if ok {
-							//	quorum++
-							//}
 						}
 					}
-
-					//if quorum <= len(rf.peers)/2 {
-					//	rf.State = 0
-					//}
 
 					//no default:
 					//but one more case: in RPC request or response

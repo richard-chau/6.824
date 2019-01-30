@@ -392,15 +392,16 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 		if rf.NextIndex[server] > rf.MatchIndex[server]+1 {
 			rf.NextIndex[server]--
 		}
-		//args := &AppendEntriesArgs{Term: rf.CurrentTerm,
-		//	LeaderId:     rf.me,
-		//	PrevLogIndex: rf.GetPrevLogIndex(server),
-		//	PrevLogTerm:  rf.GetPrevLogTerm(server),      //rf.Slog[len(rf.Slog)-1].Term,
-		//	Entries:      rf.Slog[rf.NextIndex[server]:], //heartbeat empty
-		//	LeaderCommit: rf.CommitIndex,
-		//}
+		args := &AppendEntriesArgs{Term: rf.CurrentTerm,
+			LeaderId:     rf.me,
+			PrevLogIndex: rf.GetPrevLogIndex(server),
+			PrevLogTerm:  rf.GetPrevLogTerm(server),      //rf.Slog[len(rf.Slog)-1].Term,
+			Entries:      rf.Slog[rf.NextIndex[server]:], //heartbeat empty
+			LeaderCommit: rf.CommitIndex,
+		}
 		//DPrintfB("resend entries: %d", server)
-		//return rf.sendAppendEntries(server, args, &AppendEntriesReply{})
+
+		return ok
 	}
 
 	if reply.Success == true && args.Entries != nil { //not simple else
@@ -564,7 +565,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rseed1 := rand.New(seed1)
 	RaftElectionTimeout := time.Duration(300+rseed1.Intn(200)) * time.Millisecond
 	//RaftElectionTimeout = (300 + time.Duration(rf.me)*50) * time.Millisecond
-	HeartBeatTimeout := 120 * time.Microsecond
+	HeartBeatTimeout := 120 * time.Millisecond //time.Microsecond
 	DPrintf("Waiting:%d%v", rf.me, RaftElectionTimeout)
 	// Your initialization code here (2A, 2B, 2C).
 	//time.Sleep(time.Duration(rseed1.Intn(20)) * time.Millisecond)

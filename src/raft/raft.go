@@ -150,7 +150,7 @@ type RequestVoteArgs struct {
 
 //
 // example RequestVote RPC reply structure.
-// field names must start with capital letters!git
+// field names must start with capital letters!
 //
 type RequestVoteReply struct {
 	// Your data here (2A).
@@ -164,6 +164,8 @@ type RequestVoteReply struct {
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
 	//DPrintf("In RequestVote: %d%d%d", rf.me, rf.State, rf.CurrentTerm)
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
 
 	//DPrintf("In RequestVote: %d%d", rf.me, rf.CurrentTerm)
 	if args.Term < rf.CurrentTerm {
@@ -242,10 +244,14 @@ func (rf *Raft) UpToDate(argIndex int, argTerm int) bool {
 func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply) bool {
 	DPrintf("SendRequestVote: from %d(Term: %d) to %d", args.CandidateId, args.Term, server)
 	ok := rf.peers[server].Call("Raft.RequestVote", args, reply)
+
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
 	if !ok {
 		return ok
 	}
-	if rf.State != 0 || args.Term != rf.CurrentTerm {
+	if rf.State != 0 || args.Term != rf.CurrentTerm { //mistake: rf.State = 1
 		return ok
 	}
 	if reply.CTerm > rf.CurrentTerm {
@@ -362,6 +368,10 @@ func (rf *Raft) isConflict(args []SLogEntry, rfSlog []SLogEntry) bool {
 func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
 	DPrintf("SendAppendEntries from %d(Term: %d) to %d", args.LeaderId, args.Term, server)
 	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
+
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
 	if !ok {
 		return ok
 	}
@@ -569,15 +579,18 @@ func Make(peers []*labrpc.ClientEnd, me int,
 		//timeout := time.After(RaftElectionTimeout)
 		for {
 			//DPrintf("%d%d", me, rf.CurrentTerm)
-			if rf.State == -1 { //follwer
-				select {
-				case <-time.After(RaftElectionTimeout):
-					rf.State = 0
-				case <-rf.AppendEntriesChan:
-					continue
-				case <-rf.RequestVoteChan:
-					continue
-					//no default
+			switch rf.State {
+			case -1:
+				{ //follwer
+					select {
+					case <-time.After(RaftElectionTimeout):
+						rf.State = 0
+					case <-rf.AppendEntriesChan:
+						continue
+					case <-rf.RequestVoteChan:
+						continue
+						//no default
+					}
 				}
 			case 0:
 				{
@@ -658,11 +671,6 @@ func Make(peers []*labrpc.ClientEnd, me int,
 					//but here  && rf.State == 1  can avoid error
 					time.Sleep(HeartBeatTimeout)
 				}
-				//no default:
-				//but one more case: in RPC request or response
-				//if T > cT, will set to follower -1 directly
-				//but here  && rf.State == 1  can avoid error
-				time.Sleep(HeartBeatTimeout)
 			}
 		}
 	}()

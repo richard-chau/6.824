@@ -309,6 +309,7 @@ func (cfg *config) checkOneLeader() int {
 					leaders[term] = append(leaders[term], i)
 				}
 			}
+
 		}
 
 		lastTermWithLeader := -1

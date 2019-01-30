@@ -325,8 +325,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	//but different terms), delete the existing entry and all that
 	//follow it
 	if len(args.Entries) != 0 &&
-		len(rf.Slog)-1 >= args.PrevLogIndex && //entry conflict, first must have the entry. len(rf.Slog) - 1 >= , not len(rf.Slog), not len(rf.Slog) - 1 >
-		//args.Entries[0].Term != rf.Slog[args.PrevLogIndex+1].Term { //wrong!!!!
+		len(rf.Slog)-1 >= args.PrevLogIndex && //entry conflict, first must have the entry. len(rf.Slog) - 1 >= , not len(rf.Slog), not  len(rf.Slog)-1 >
+		//actually this must satisfy, so we can remove this , will not affect working
 		rf.isConflict(args.Entries, rf.Slog[args.PrevLogIndex+1:]) {
 		rf.Slog = rf.Slog[:args.PrevLogIndex+1] // not match with args.Entries[0]
 
@@ -436,6 +436,8 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 }
 
 func (rf *Raft) commitlog() {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
 	for i := rf.LastApplied + 1; i <= rf.CommitIndex; i++ {
 		rf.applyCh <- ApplyMsg{Command: rf.Slog[i].Command, CommandIndex: i, CommandValid: true}
 	}
@@ -457,22 +459,27 @@ func (rf *Raft) commitlog() {
 // the leader.
 //
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
-	index := -1
-	term := -1
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
+	index := 0 //-1
+	term := 0  //-1
 	isLeader := true
 
 	// Your code here (2B).
 	if rf.State != 1 {
-		return -1, rf.CurrentTerm, false
+		//return 0, rf.CurrentTerm, false
+		return 0, 0, false
 	}
 
-	rf.mu.Lock()
+	//rf.mu.Lock()
 	rf.command = command
 	//commandInt, _ := command.(int)
 	rf.Slog = append(rf.Slog, SLogEntry{Term: rf.CurrentTerm, Command: command})
 	//REM: respond after entry applied to state machine
-	index = rf.CommitIndex + 1
-	rf.mu.Unlock()
+	index = len(rf.Slog) - 1 //rf.GetLastLogIndex() + 1 //
+	//index = rf.CommitIndex + 1
+	//rf.mu.Unlock()
 
 	DPrintfB("Start %d, next index %d", rf.me, index)
 
@@ -534,7 +541,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.me = me
 	rf.applyCh = applyCh
 
-	rf.CurrentTerm = 1 // not 0
+	rf.CurrentTerm = 0 // not 0
 	rf.VoteFor = -1
 	rf.Slog = []SLogEntry{}                                     //nil //REM:
 	rf.Slog = append(rf.Slog, SLogEntry{Term: 0, Command: nil}) // Term start from 1, so is Slog index
@@ -555,13 +562,17 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 	seed1 := rand.NewSource(time.Now().UnixNano())
 	rseed1 := rand.New(seed1)
-	RaftElectionTimeout := time.Duration(200+rseed1.Intn(200)) * time.Millisecond
+	RaftElectionTimeout := time.Duration(300+rseed1.Intn(200)) * time.Millisecond
 	//RaftElectionTimeout = (300 + time.Duration(rf.me)*50) * time.Millisecond
-	HeartBeatTimeout := 100 * time.Microsecond
+	HeartBeatTimeout := 120 * time.Microsecond
 	DPrintf("Waiting:%d%v", rf.me, RaftElectionTimeout)
 	// Your initialization code here (2A, 2B, 2C).
 	//time.Sleep(time.Duration(rseed1.Intn(20)) * time.Millisecond)
 	//time.Sleep(RaftElectionTimeout)
+
+	// initialize from state persisted before a crash
+	rf.readPersist(persister.ReadRaftState())
+
 	go func() {
 		//timeout := time.After(RaftElectionTimeout)
 		for {
@@ -597,17 +608,17 @@ func Make(peers []*labrpc.ClientEnd, me int,
 					rf.mu.Unlock()
 
 					//REM: reset the election timer
-					go func() {
-						//DPrintf("Leader- %d%d%d", rf.me, rf.CurrentTerm, succeesNum)
-						for i := 0; i < len(rf.peers); i++ {
-							if i != rf.me && rf.State == 0 { //rf.State may be
-								//modified by other case
-								go rf.sendRequestVote(i, args, &RequestVoteReply{}) //reply should pass value instead of reference!!!
+					//go func() {
+					//DPrintf("Leader- %d%d%d", rf.me, rf.CurrentTerm, succeesNum)
+					for i := 0; i < len(rf.peers); i++ {
+						if i != rf.me && rf.State == 0 { //rf.State may be
+							//modified by other case
+							go rf.sendRequestVote(i, args, &RequestVoteReply{}) //reply should pass value instead of reference!!!
 
-							}
 						}
+					}
 
-					}()
+					//}()
 
 					select {
 					case <-time.After(RaftElectionTimeout): //timeout:
@@ -629,10 +640,11 @@ func Make(peers []*labrpc.ClientEnd, me int,
 				}
 			case 1:
 				{
+					rf.mu.Lock()
 					for i := 0; i < len(rf.peers); i++ {
 						if i != rf.me && rf.State == 1 { //rf.State may be
 							//modified by other case
-							rf.mu.Lock()
+							//rf.mu.Lock()
 							DPrintfB("Me: %d (Term %d, loglen %d), send to %d, PrevLogIndex: %d", rf.me, rf.CurrentTerm, len(rf.Slog), i, rf.GetPrevLogIndex(i))
 							args := &AppendEntriesArgs{Term: rf.CurrentTerm,
 								LeaderId:     rf.me,
@@ -646,11 +658,11 @@ func Make(peers []*labrpc.ClientEnd, me int,
 							if rf.NextIndex[i] <= len(rf.Slog)-1 {
 								args.Entries = rf.Slog[rf.NextIndex[i]:]
 							}
-							rf.mu.Unlock()
+							//rf.mu.Unlock()
 							go rf.sendAppendEntries(i, args, &AppendEntriesReply{})
 						}
 					}
-
+					rf.mu.Unlock()
 					//no default:
 					//but one more case: in RPC request or response
 					//if T > cT, will set to follower -1 directly
@@ -660,9 +672,6 @@ func Make(peers []*labrpc.ClientEnd, me int,
 			}
 		}
 	}()
-
-	// initialize from state persisted before a crash
-	rf.readPersist(persister.ReadRaftState())
 
 	return rf
 }

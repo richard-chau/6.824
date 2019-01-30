@@ -171,6 +171,7 @@ func (cfg *config) start1(i int) {
 			if m.CommandValid == false {
 				// ignore other types of ApplyMsg
 			} else if v, ok := (m.Command).(int); ok {
+				DPrintfB("Commands", v, ok)
 				cfg.mu.Lock()
 				for j := 0; j < len(cfg.logs); j++ {
 					if old, oldok := cfg.logs[j][m.CommandIndex]; oldok && old != v {
@@ -179,6 +180,7 @@ func (cfg *config) start1(i int) {
 							m.CommandIndex, i, m.Command, j, old)
 					}
 				}
+				DPrintfB("Commited: %d, Index %d, %v", i, m.CommandIndex, ok)
 				_, prevok := cfg.logs[i][m.CommandIndex-1]
 				cfg.logs[i][m.CommandIndex] = v
 				if m.CommandIndex > cfg.maxIndex {
@@ -307,6 +309,7 @@ func (cfg *config) checkOneLeader() int {
 					leaders[term] = append(leaders[term], i)
 				}
 			}
+
 		}
 
 		lastTermWithLeader := -1
@@ -439,19 +442,22 @@ func (cfg *config) one(cmd int, expectedServers int, retry bool) int {
 			cfg.mu.Unlock()
 			if rf != nil {
 				index1, _, ok := rf.Start(cmd)
+
 				if ok {
 					index = index1
+					//DPrintfB("Leader %d", si) // wrong: not leader. will always be si = 2
 					break
 				}
 			}
 		}
-
+		//fmt.Println(index)
 		if index != -1 {
 			// somebody claimed to be the leader and to have
 			// submitted our command; wait a while for agreement.
 			t1 := time.Now()
 			for time.Since(t1).Seconds() < 2 {
 				nd, cmd1 := cfg.nCommitted(index)
+				DPrintfB("Index: %d, OKservers: %d, expectedServers:%d", index, nd, expectedServers)
 				if nd > 0 && nd >= expectedServers {
 					// committed
 					if cmd2, ok := cmd1.(int); ok && cmd2 == cmd {

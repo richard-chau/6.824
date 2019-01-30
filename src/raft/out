@@ -1,8 +1,304 @@
-Test (2A): initial election ...
-  ... Passed --   3.0  3 11946    0
-Test (2A): election after network failure ...
---- FAIL: TestReElection2A (5.36s)
-	config.go:326: expected one leader, got none
-FAIL
-exit status 1
-FAIL	raft	8.345s
+Test (2B): agreement despite follower disconnection ...
+0 0
+0 0
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 1
+2019/01/29 15:49:41 send entries: 2
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 2
+2019/01/29 15:49:41 send entries: 1
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 2
+2019/01/29 15:49:41 send entries: 1
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 2
+2019/01/29 15:49:41 send entries: 1
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 2
+2019/01/29 15:49:41 send entries: 1
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 2
+2019/01/29 15:49:41 send entries: 1
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 2
+2019/01/29 15:49:41 send entries: 1
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 1
+2019/01/29 15:49:41 send entries: 2
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 1
+2019/01/29 15:49:41 send entries: 2
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 2
+2019/01/29 15:49:41 send entries: 1
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 1
+2019/01/29 15:49:41 send entries: 2
+2019/01/29 15:49:41 send entries: 2
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 1
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 1
+2019/01/29 15:49:41 send entries: 2
+2019/01/29 15:49:41 send entries: 2
+2019/01/29 15:49:41 send entries: 1
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 2
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 1
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 2
+2019/01/29 15:49:41 send entries: 1
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 2
+2019/01/29 15:49:41 send entries: 1
+0 0
+2019/01/29 15:49:41 send entries: 2
+0 0
+2019/01/29 15:49:41 send entries: 1
+2019/01/29 15:49:41 send entries: 2
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 1
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 2
+2019/01/29 15:49:41 send entries: 1
+2019/01/29 15:49:41 send entries: 2
+2019/01/29 15:49:41 send entries: 1
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 2
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 1
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 1
+2019/01/29 15:49:41 send entries: 2
+2019/01/29 15:49:41 send entries: 2
+2019/01/29 15:49:41 send entries: 1
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 1
+2019/01/29 15:49:41 send entries: 2
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 2
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 1
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 2
+2019/01/29 15:49:41 send entries: 1
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 2
+2019/01/29 15:49:41 send entries: 1
+2019/01/29 15:49:41 send entries: 2
+2019/01/29 15:49:41 send entries: 1
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 2
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 1
+2019/01/29 15:49:41 send entries: 2
+2019/01/29 15:49:41 send entries: 1
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 2
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 1
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 2
+2019/01/29 15:49:41 send entries: 1
+2019/01/29 15:49:41 send entries: 2
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 1
+2019/01/29 15:49:41 send entries: 2
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 1
+2019/01/29 15:49:41 send entries: 2
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 1
+2019/01/29 15:49:41 send entries: 2
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 1
+2019/01/29 15:49:41 send entries: 2
+2019/01/29 15:49:41 send entries: 1
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 2
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 1
+2019/01/29 15:49:41 send entries: 2
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 1
+2019/01/29 15:49:41 send entries: 2
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 1
+2019/01/29 15:49:41 send entries: 2
+2019/01/29 15:49:41 send entries: 1
+0 0
+0 0
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 2
+2019/01/29 15:49:41 send entries: 1
+2019/01/29 15:49:41 send entries: 2
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 1
+2019/01/29 15:49:41 send entries: 2
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 1
+2019/01/29 15:49:41 send entries: 1
+2019/01/29 15:49:41 send entries: 2
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 2
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 1
+2019/01/29 15:49:41 send entries: 2
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 1
+2019/01/29 15:49:41 send entries: 2
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 1
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 2
+2019/01/29 15:49:41 send entries: 1
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 2
+2019/01/29 15:49:41 send entries: 1
+2019/01/29 15:49:41 send entries: 2
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 1
+0 0
+2019/01/29 15:49:41 send entries: 2
+0 0
+2019/01/29 15:49:41 send entries: 1
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 1
+2019/01/29 15:49:41 send entries: 2
+2019/01/29 15:49:41 send entries: 2
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 1
+2019/01/29 15:49:41 send entries: 2
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 1
+2019/01/29 15:49:41 send entries: 2
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 1
+2019/01/29 15:49:41 send entries: 2
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 1
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 2
+2019/01/29 15:49:41 send entries: 1
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 1
+2019/01/29 15:49:41 send entries: 2
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 1
+2019/01/29 15:49:41 send entries: 2
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 1
+2019/01/29 15:49:41 send entries: 2
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 1
+2019/01/29 15:49:41 send entries: 2
+0 0
+0 0
+2019/01/29 15:49:41 send entries: 1
+2019/01/29 15:49:41 send entries: 2
+2019/01/29 15:49:41 send entries: 2
+0 0
+0 0
+2019/01/29 15:49:41 Start 0, next index 0
+2019/01/29 15:49:41 Index: 0, OKservers: 0, expectedServers:3
+2019/01/29 15:49:41 send entries: 2
+0 1
+0 1
+2019/01/29 15:49:41 send entries: 1
+2019/01/29 15:49:41 send entries: 1
+2019/01/29 15:49:41 2: []gagaga
+2019/01/29 15:49:41 [{1 101}]
+2019/01/29 15:49:41 2: [{1 101}]gagaga
+2019/01/29 15:49:41 1: []gagaga
+2019/01/29 15:49:41 [{1 101} {1 101}]
+2019/01/29 15:49:41 [{1 101}]
+2019/01/29 15:49:41 1: [{1 101}]gagaga
+2019/01/29 15:49:41 send entries: 2
+Commands 101 true
+2019/01/29 15:49:41 [{1 101} {1 101}]
+2019/01/29 15:49:41 Commited: 0, Index 0, true
+0 1
+1 1
+2019/01/29 15:49:41 send entries: 1
+Commands 101 true
+2019/01/29 15:49:41 Commited: 0, Index 0, true
+2019/01/29 15:49:41 send entries: 2
+Commands 101 true
+2019/01/29 15:49:41 Commited: 0, Index 0, true
+2019/01/29 15:49:41 send entries: 1
+Commands 101 true
+2019/01/29 15:49:41 Commited: 0, Index 0, true
+Commands 101 true
+2019/01/29 15:49:41 Commited: 2, Index 0, true
+panic: runtime error: index out of range
+
+goroutine 8 [running]:
+raft.(*Raft).GetPrevLogTerm(...)
+	/home/winter/Projects/6.824/src/raft/raft.go:496
+raft.Make.func1(0xc4200921c0, 0xe3ed9c0, 0x186a0)
+	/home/winter/Projects/6.824/src/raft/raft.go:612 +0x76b
+created by raft.Make
+	/home/winter/Projects/6.824/src/raft/raft.go:545 +0x607
+exit status 2
+FAIL	raft	0.256s

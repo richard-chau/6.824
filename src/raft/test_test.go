@@ -106,7 +106,7 @@ func TestBasicAgree2B(t *testing.T) {
 		DPrintfB("This is index %d", index)
 		xindex := cfg.one(index*100, servers, false)
 		////if xindex != index {
-		if xindex+1 != index {
+		if xindex != index {
 			t.Fatalf("got index %v but expected %v", xindex, index)
 		}
 	}

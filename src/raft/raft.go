@@ -400,7 +400,8 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 			LeaderCommit: rf.CommitIndex,
 		}
 		//DPrintfB("resend entries: %d", server)
-
+		time.Sleep(time.Duration(rand.Intn(50)) * time.Millisecond)
+		go rf.sendAppendEntries(server, args, &AppendEntriesReply{})
 		return ok
 	}
 

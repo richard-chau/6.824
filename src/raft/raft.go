@@ -62,6 +62,9 @@ type Raft struct {
 	// Your data here (2A, 2B, 2C).
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
+	applyCh (chan ApplyMsg)
+	command (interface{})
+
 	CurrentTerm int
 	VoteFor     int
 	Slog        []SLogEntry
@@ -79,8 +82,7 @@ type Raft struct {
 	ElectWin          (chan bool)
 	succeesNum        int
 
-	applyCh (chan ApplyMsg)
-	command (interface{})
+	OptimizeMultipleEntries int
 }
 
 // return currentTerm and whether this server
@@ -285,8 +287,9 @@ type AppendEntriesArgs struct {
 
 type AppendEntriesReply struct {
 	// Your data here (2A).
-	CTerm   int
-	Success bool
+	CTerm        int
+	Success      bool
+	NextTryIndex int
 }
 
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
@@ -297,6 +300,9 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	if args.Term < rf.CurrentTerm {
 		reply.CTerm = rf.CurrentTerm
 		reply.Success = false
+		//if rf.OptimizeMultipleEntries == 1 {
+		//	reply.NextTryIndex = rf.GetLastLogIndex() + 1
+		//}
 		return
 	}
 
@@ -306,17 +312,39 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		rf.CurrentTerm = args.Term
 		rf.State = -1
 		rf.VoteFor = -1
+
+		//if rf.OptimizeMultipleEntries == 1 {
+		//	reply.NextTryIndex = rf.GetLastLogIndex() + 1
+		//}
 	} //all puts before reply.CTerm = rf.CurrentTerm
 
 	reply.CTerm = rf.CurrentTerm
 	rf.AppendEntriesChan <- true
 	//Reply false if log doesn’t contain an entry at prevLogIndex
 	//whose term matches prevLogTerm
-	if args.PrevLogIndex > len(rf.Slog)-1 ||
-		(args.PrevLogIndex > 0 && // > 0??
-			rf.Slog[args.PrevLogIndex].Term != args.PrevLogTerm) {
+	if args.PrevLogIndex > len(rf.Slog)-1 {
 		reply.CTerm = rf.CurrentTerm
 		reply.Success = false
+
+		if rf.OptimizeMultipleEntries == 1 {
+			reply.NextTryIndex = rf.GetLastLogIndex() + 1
+		}
+		return // without return, report error
+	}
+	if args.PrevLogIndex > 0 && // > 0??
+		rf.Slog[args.PrevLogIndex].Term != args.PrevLogTerm {
+		reply.CTerm = rf.CurrentTerm
+		reply.Success = false
+
+		if rf.OptimizeMultipleEntries == 1 {
+			term := rf.Slog[args.PrevLogIndex].Term
+
+			for reply.NextTryIndex = args.PrevLogIndex - 1; reply.NextTryIndex > 0 && rf.Slog[reply.NextTryIndex].Term == term; reply.NextTryIndex-- {
+			}
+
+			reply.NextTryIndex++
+			//reply.NextTryIndex = rf.GetLastLogIndex() + 1. wrong, else Test (2B): rejoin of partitioned leader
+		}
 		return
 	}
 
@@ -333,6 +361,14 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		DPrintfB("%d: %vgagaga", rf.me, rf.Slog)
 		rf.Slog = append(rf.Slog, args.Entries...) //...
 		DPrintfB("%v", rf.Slog)
+
+	}
+
+	if rf.OptimizeMultipleEntries == 1 {
+		//reply.NextTryIndex = args.PrevLogIndex //
+		reply.NextTryIndex = rf.GetLastLogIndex() + 1
+		//fmt.Println(reply.NextTryIndex, args.PrevLogIndex)
+
 	}
 
 	if args.LeaderCommit > rf.CommitIndex {
@@ -389,26 +425,32 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 	//DPrintfB("send entries: %d", server)
 
 	if reply.Success == false { //handle log inconsistency.
-		if rf.NextIndex[server] > rf.MatchIndex[server]+1 {
-			rf.NextIndex[server]--
+		if rf.OptimizeMultipleEntries == 1 {
+			rf.NextIndex[server] = reply.NextTryIndex
+		} else {
+			if rf.NextIndex[server] > rf.MatchIndex[server]+1 {
+				rf.NextIndex[server]--
+			}
 		}
-		args := &AppendEntriesArgs{Term: rf.CurrentTerm,
-			LeaderId:     rf.me,
-			PrevLogIndex: rf.GetPrevLogIndex(server),
-			PrevLogTerm:  rf.GetPrevLogTerm(server),      //rf.Slog[len(rf.Slog)-1].Term,
-			Entries:      rf.Slog[rf.NextIndex[server]:], //heartbeat empty
-			LeaderCommit: rf.CommitIndex,
+		if rf.OptimizeMultipleEntries != 1 {
+			args := &AppendEntriesArgs{Term: rf.CurrentTerm,
+				LeaderId:     rf.me,
+				PrevLogIndex: rf.GetPrevLogIndex(server),
+				PrevLogTerm:  rf.GetPrevLogTerm(server),      //rf.Slog[len(rf.Slog)-1].Term,
+				Entries:      rf.Slog[rf.NextIndex[server]:], //heartbeat empty
+				LeaderCommit: rf.CommitIndex,
+			}
+			//DPrintfB("resend entries: %d", server)
+			time.Sleep(time.Duration(rand.Intn(50)) * time.Millisecond)
+			go rf.sendAppendEntries(server, args, &AppendEntriesReply{})
 		}
-		//DPrintfB("resend entries: %d", server)
-		time.Sleep(time.Duration(rand.Intn(50)) * time.Millisecond)
-		go rf.sendAppendEntries(server, args, &AppendEntriesReply{})
 		return ok
 	}
 
 	if reply.Success == true && args.Entries != nil { //not simple else
-		//rf.NextIndex[server]++
+
 		rf.MatchIndex[server] = args.PrevLogIndex + len(args.Entries)
-		rf.NextIndex[server] = rf.MatchIndex[server] + 1
+		rf.NextIndex[server] = rf.MatchIndex[server] + 1 // not rf.NextIndex[server]++
 
 		for N := len(rf.Slog) - 1; N > rf.CommitIndex; N-- {
 			if rf.Slog[N].Term == rf.CurrentTerm {
@@ -429,7 +471,7 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 			}
 			//if rf.Slog[N].Term < rf.CurrentTerm {
 			//	break
-			//}
+			//} //wrong for Test (2B): leader backs up quickly over incorrect follower logs
 		}
 
 	}
@@ -559,6 +601,8 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.RequestVoteChan = make(chan bool)
 	rf.AppendEntriesChan = make(chan bool)
 	rf.ElectWin = make(chan bool)
+
+	rf.OptimizeMultipleEntries = 1
 
 	rf.State = -1
 

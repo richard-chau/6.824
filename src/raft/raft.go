@@ -294,11 +294,11 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	DPrintf("%d(Term: %d) RecvAppendEntries from %d(Term: %d)", rf.me, rf.CurrentTerm, args.LeaderId, args.Term)
+	DPrintfB("%d(Term: %d, loglen: %d) RecvAppendEntries from %d(Term: %d, preIdx %d),", rf.me, rf.CurrentTerm, len(rf.Slog), args.LeaderId, args.Term, args.PrevLogIndex)
 	if args.Term < rf.CurrentTerm {
 		reply.CTerm = rf.CurrentTerm
 		reply.Success = false
-		reply.NextTryIndex = rf.GetLastLogIndex() + 1
+		//reply.NextTryIndex = rf.GetLastLogIndex() + 1
 		return
 	}
 
@@ -325,16 +325,16 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	//}
 
 	if args.PrevLogIndex > len(rf.Slog)-1 {
-		reply.NextTryIndex = len(rf.Slog)
+		//reply.NextTryIndex = len(rf.Slog)
 		return
 	}
 
 	if args.PrevLogIndex > 0 &&
 		rf.Slog[args.PrevLogIndex].Term != args.PrevLogTerm {
-		term := rf.Slog[args.PrevLogIndex].Term
-		for reply.NextTryIndex = args.PrevLogIndex - 1; reply.NextTryIndex > 0 && rf.Slog[reply.NextTryIndex].Term == term; reply.NextTryIndex-- {
-		}
-		reply.NextTryIndex++
+		//term := rf.Slog[args.PrevLogIndex].Term
+		//for reply.NextTryIndex = args.PrevLogIndex - 1; reply.NextTryIndex > 0 && rf.Slog[reply.NextTryIndex].Term == term; reply.NextTryIndex-- {
+		//}
+		//reply.NextTryIndex++
 		return
 	}
 
@@ -365,7 +365,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	}
 
 	reply.Success = true
-	reply.NextTryIndex = args.PrevLogIndex
+	//reply.NextTryIndex = args.PrevLogIndex
 
 	if args.LeaderCommit > rf.CommitIndex {
 		rf.CommitIndex = Min(args.LeaderCommit, rf.GetLastLogIndex())
@@ -419,7 +419,13 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 
 	if reply.Success == false { //handle log inconsistency.
 		//rf.NextIndex[server]--
-		rf.NextIndex[server] = reply.NextTryIndex
+
+		if rf.NextIndex[server] > rf.MatchIndex[server]+1 {
+			rf.NextIndex[server]--
+		}
+		//DPrintfB("Here%d, %d, %d", server, rf.NextIndex[server], rf.MatchIndex[server])
+		//rf.NextIndex[server] = reply.NextTryIndex
+
 		//args := &AppendEntriesArgs{Term: rf.CurrentTerm,
 		//	LeaderId:     rf.me,
 		//	PrevLogIndex: rf.GetPrevLogIndex(server),
@@ -665,7 +671,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 						if i != rf.me && rf.State == 1 { //rf.State may be
 							//modified by other case
 							rf.mu.Lock()
-							DPrintfB("Me: %d, PrevLogIndex: %d", rf.me, rf.GetPrevLogIndex(i))
+							DPrintfB("Me: %d (Term %d, loglen %d), send to %d, PrevLogIndex: %d", rf.me, rf.CurrentTerm, len(rf.Slog), i, rf.GetPrevLogIndex(i))
 							args := &AppendEntriesArgs{Term: rf.CurrentTerm,
 								LeaderId:     rf.me,
 								PrevLogIndex: rf.GetPrevLogIndex(i),

@@ -285,9 +285,8 @@ type AppendEntriesArgs struct {
 
 type AppendEntriesReply struct {
 	// Your data here (2A).
-	CTerm        int
-	Success      bool
-	NextTryIndex int
+	CTerm   int
+	Success bool
 }
 
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
@@ -298,7 +297,6 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	if args.Term < rf.CurrentTerm {
 		reply.CTerm = rf.CurrentTerm
 		reply.Success = false
-		//reply.NextTryIndex = rf.GetLastLogIndex() + 1
 		return
 	}
 
@@ -310,65 +308,39 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		rf.VoteFor = -1
 	} //all puts before reply.CTerm = rf.CurrentTerm
 
-	reply.Success = false
 	reply.CTerm = rf.CurrentTerm
 	rf.AppendEntriesChan <- true
-
 	//Reply false if log doesn’t contain an entry at prevLogIndex
 	//whose term matches prevLogTerm
-	//if args.PrevLogIndex > len(rf.Slog)-1 ||
-	//	(args.PrevLogIndex >= 0 && // > 0??
-	//		rf.Slog[args.PrevLogIndex].Term != args.PrevLogTerm) {
-	//	reply.CTerm = rf.CurrentTerm
-	//	reply.Success = false
-	//	return
-	//}
-
-	if args.PrevLogIndex > len(rf.Slog)-1 {
-		//reply.NextTryIndex = len(rf.Slog)
+	if args.PrevLogIndex > len(rf.Slog)-1 ||
+		(args.PrevLogIndex > 0 && // > 0??
+			rf.Slog[args.PrevLogIndex].Term != args.PrevLogTerm) {
+		reply.CTerm = rf.CurrentTerm
+		reply.Success = false
 		return
 	}
-
-	if args.PrevLogIndex > 0 &&
-		rf.Slog[args.PrevLogIndex].Term != args.PrevLogTerm {
-		//term := rf.Slog[args.PrevLogIndex].Term
-		//for reply.NextTryIndex = args.PrevLogIndex - 1; reply.NextTryIndex > 0 && rf.Slog[reply.NextTryIndex].Term == term; reply.NextTryIndex-- {
-		//}
-		//reply.NextTryIndex++
-		return
-	}
-
-	//reply.CTerm = rf.CurrentTerm
-	//rf.AppendEntriesChan <- true
 
 	//fmt.Println(len(rf.Slog), args.PrevLogIndex+1)
 	//If an existing entry conflicts with a new one (same index
 	//but different terms), delete the existing entry and all that
 	//follow it
-	/*if len(args.Entries) != 0 &&
-		len(rf.Slog)-1 > args.PrevLogIndex && //entry conflict, first must have the entry. len(rf.Slog) - 1, not len(rf.Slog) //wrong!!
-		args.Entries[0].Term != rf.Slog[args.PrevLogIndex+1].Term { //wrong!!!!
+	if len(args.Entries) != 0 &&
+		len(rf.Slog)-1 >= args.PrevLogIndex && //entry conflict, first must have the entry. len(rf.Slog) - 1 >= , not len(rf.Slog), not len(rf.Slog) - 1 >
+		//args.Entries[0].Term != rf.Slog[args.PrevLogIndex+1].Term { //wrong!!!!
+		rf.isConflict(args.Entries, rf.Slog[args.PrevLogIndex+1:]) {
 		rf.Slog = rf.Slog[:args.PrevLogIndex+1] // not match with args.Entries[0]
 
 		DPrintfB("%d: %vgagaga", rf.me, rf.Slog)
-		rf.Slog = append(rf.Slog, args.Entries...)
+		rf.Slog = append(rf.Slog, args.Entries...) //...
 		DPrintfB("%v", rf.Slog)
-	}*/
-
-	var restLogs []SLogEntry
-	rf.Slog, restLogs = rf.Slog[:args.PrevLogIndex+1], rf.Slog[args.PrevLogIndex+1:]
-
-	if rf.hasConflictLogs(restLogs, args.Entries) || len(restLogs) < len(args.Entries) {
-		rf.Slog = append(rf.Slog, args.Entries...)
-	} else {
-		rf.Slog = append(rf.Slog, restLogs...)
 	}
-
-	reply.Success = true
-	//reply.NextTryIndex = args.PrevLogIndex
 
 	if args.LeaderCommit > rf.CommitIndex {
 		rf.CommitIndex = Min(args.LeaderCommit, rf.GetLastLogIndex())
+		//rf.applyCh <- ApplyMsg{Command: rf.Slog[rf.CommitIndex].Command, CommandIndex: rf.CommitIndex, CommandValid: true}
+		//if rf.LastApplied < rf.CommitIndex {
+		//	rf.LastApplied = rf.CommitIndex
+		//}
 		go rf.commitlog()
 		//REM: incr lastApplied, and apply log to state machine
 	}
@@ -381,16 +353,15 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	return
 }
 
-func (rf *Raft) hasConflictLogs(serverLogs []SLogEntry, leaderLogs []SLogEntry) bool {
-	for i := range serverLogs {
-		if i >= len(leaderLogs) {
-			break
+func (rf *Raft) isConflict(args []SLogEntry, rfSlog []SLogEntry) bool {
+	for i := 0; i < len(args); i++ {
+		if i >= len(rfSlog) {
+			return true //args is longer
 		}
-		if serverLogs[i].Term != leaderLogs[i].Term {
+		if args[i] != rfSlog[i] {
 			return true
 		}
 	}
-
 	return false
 }
 
@@ -418,14 +389,9 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 	//DPrintfB("send entries: %d", server)
 
 	if reply.Success == false { //handle log inconsistency.
-		//rf.NextIndex[server]--
-
 		if rf.NextIndex[server] > rf.MatchIndex[server]+1 {
 			rf.NextIndex[server]--
 		}
-		//DPrintfB("Here%d, %d, %d", server, rf.NextIndex[server], rf.MatchIndex[server])
-		//rf.NextIndex[server] = reply.NextTryIndex
-
 		//args := &AppendEntriesArgs{Term: rf.CurrentTerm,
 		//	LeaderId:     rf.me,
 		//	PrevLogIndex: rf.GetPrevLogIndex(server),
@@ -439,7 +405,6 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 
 	if reply.Success == true && args.Entries != nil { //not simple else
 		//rf.NextIndex[server]++
-		//rf.MatchIndex[server]++
 		rf.MatchIndex[server] = args.PrevLogIndex + len(args.Entries)
 		rf.NextIndex[server] = rf.MatchIndex[server] + 1
 
@@ -471,8 +436,6 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 }
 
 func (rf *Raft) commitlog() {
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
 	for i := rf.LastApplied + 1; i <= rf.CommitIndex; i++ {
 		rf.applyCh <- ApplyMsg{Command: rf.Slog[i].Command, CommandIndex: i, CommandValid: true}
 	}
@@ -497,8 +460,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	index := -1
 	term := -1
 	isLeader := true
-	//rf.mu.Lock()
-	//defer rf.mu.Unlock()
+
 	// Your code here (2B).
 	if rf.State != 1 {
 		return -1, rf.CurrentTerm, false

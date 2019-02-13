@@ -110,7 +110,6 @@ func TestBasicAgree2B(t *testing.T) {
 			t.Fatalf("got index %v but expected %v", xindex, index)
 		}
 	}
-
 	cfg.end()
 }
 
@@ -624,13 +623,14 @@ func TestPersist32C(t *testing.T) {
 	cfg.disconnect((leader + 2) % servers)
 
 	cfg.one(102, 2, true)
-
+	DPrintfC("Now leader: %d ---------------------------", leader)
 	cfg.crash1((leader + 0) % servers)
 	cfg.crash1((leader + 1) % servers)
 	cfg.connect((leader + 2) % servers)
 	cfg.start1((leader + 0) % servers)
 	cfg.connect((leader + 0) % servers)
-
+	leadertmp := cfg.checkOneLeader()
+	DPrintfC("Now leader: %d rather than %d--------------------------- and %d", leadertmp, leader, (leader+2)%servers)
 	cfg.one(103, 2, true)
 
 	cfg.start1((leader + 1) % servers)

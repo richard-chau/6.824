@@ -148,6 +148,8 @@ func partitioner(t *testing.T, cfg *config, ch chan bool, done *int32) {
 // the test repartitions the network concurrently with the clients and servers. If
 // maxraftstate is a positive number, the size of the state for Raft (i.e., log
 // size) shouldn't exceed 2*maxraftstate.
+
+//GenericTest(t, "3A", 1, false, false, true, -1)
 func GenericTest(t *testing.T, part string, nclients int, unreliable bool, crash bool, partitions bool, maxraftstate int) {
 
 	title := "Test: "
@@ -188,35 +190,46 @@ func GenericTest(t *testing.T, part string, nclients int, unreliable bool, crash
 	for i := 0; i < nclients; i++ {
 		clnts[i] = make(chan int)
 	}
+
+	DPrintf4("Here")
+
 	for i := 0; i < 3; i++ {
 		// log.Printf("Iteration %v\n", i)
 		atomic.StoreInt32(&done_clients, 0)
 		atomic.StoreInt32(&done_partitioner, 0)
-		go spawn_clients_and_wait(t, cfg, nclients, func(cli int, myck *Clerk, t *testing.T) {
-			j := 0
-			defer func() {
-				clnts[cli] <- j
-			}()
-			last := ""
-			key := strconv.Itoa(cli)
-			Put(cfg, myck, key, last)
-			for atomic.LoadInt32(&done_clients) == 0 {
-				if (rand.Int() % 1000) < 500 {
-					nv := "x " + strconv.Itoa(cli) + " " + strconv.Itoa(j) + " y"
-					// log.Printf("%d: client new append %v\n", cli, nv)
-					Append(cfg, myck, key, nv)
-					last = NextValue(last, nv)
-					j++
-				} else {
-					// log.Printf("%d: client new get %v\n", cli, key)
-					v := Get(cfg, myck, key)
-					if v != last {
-						log.Fatalf("get wrong value, key %v, wanted:\n%v\n, got\n%v\n", key, last, v)
+		go spawn_clients_and_wait(t, cfg, nclients,
+			func(cli int, myck *Clerk, t *testing.T) {
+				j := 0
+				defer func() {
+					clnts[cli] <- j
+				}()
+				DPrintf4("stub %d", cli)
+				last := ""
+				key := strconv.Itoa(cli)
+				DPrintf4("stub %d", cli)
+				Put(cfg, myck, key, last)
+				DPrintf4("stub %d", cli)
+				for atomic.LoadInt32(&done_clients) == 0 {
+					DPrintf4("stub %d", cli)
+					if (rand.Int() % 1000) < 500 {
+						nv := "x " + strconv.Itoa(cli) + " " + strconv.Itoa(j) + " y"
+						log.Printf("%d: client new append %v\n", cli, nv)
+						Append(cfg, myck, key, nv)
+						last = NextValue(last, nv)
+						j++
+					} else {
+						log.Printf("%d: client new get %v\n", cli, key)
+						v := Get(cfg, myck, key)
+						if v != last {
+							log.Fatalf("get wrong value, key %v, wanted:\n%v\n, got\n%v\n", key, last, v)
+						}
 					}
+					DPrintf4("stub %d", cli)
 				}
-			}
-		})
+				DPrintf4("stub %d", cli)
+			})
 
+		DPrintf4("if partition 1")
 		if partitions {
 			// Allow the clients to perform some operations without interruption
 			time.Sleep(1 * time.Second)
@@ -227,6 +240,7 @@ func GenericTest(t *testing.T, part string, nclients int, unreliable bool, crash
 		atomic.StoreInt32(&done_clients, 1)     // tell clients to quit
 		atomic.StoreInt32(&done_partitioner, 1) // tell partitioner to quit
 
+		DPrintf4("if partition 2")
 		if partitions {
 			// log.Printf("wait for partitioner\n")
 			<-ch_partitioner
@@ -238,6 +252,8 @@ func GenericTest(t *testing.T, part string, nclients int, unreliable bool, crash
 			// wait for a while so that we have a new term
 			time.Sleep(electionTimeout)
 		}
+
+		DPrintf4("if crash")
 
 		if crash {
 			// log.Printf("shutdown servers\n")
@@ -255,15 +271,16 @@ func GenericTest(t *testing.T, part string, nclients int, unreliable bool, crash
 			cfg.ConnectAll()
 		}
 
+		DPrintf4("after partition")
 		// log.Printf("wait for clients\n")
 		for i := 0; i < nclients; i++ {
-			// log.Printf("read from clients %d\n", i)
+			log.Printf("read from clients %d\n", i)
 			j := <-clnts[i]
 			// if j < 10 {
 			// 	log.Printf("Warning: client %d managed to perform only %d put operations in 1 sec?\n", i, j)
 			// }
 			key := strconv.Itoa(i)
-			// log.Printf("Check %v for client %d\n", j, i)
+			log.Printf("Check %v for client %d\n", j, i)
 			v := Get(cfg, ck, key)
 			checkClntAppends(t, i, v, j)
 		}
@@ -332,6 +349,7 @@ func GenericTestLinearizability(t *testing.T, part string, nclients int, nserver
 			defer func() {
 				clnts[cli] <- j
 			}()
+
 			for atomic.LoadInt32(&done_clients) == 0 {
 				key := strconv.Itoa(rand.Int() % nclients)
 				nv := "x " + strconv.Itoa(cli) + " " + strconv.Itoa(j) + " y"

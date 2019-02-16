@@ -4,10 +4,12 @@ import "labrpc"
 import "crypto/rand"
 import "math/big"
 
-
 type Clerk struct {
 	servers []*labrpc.ClientEnd
 	// You will have to modify this struct.
+	me         int64 //?
+	lastLeader int
+	snum       int
 }
 
 func nrand() int64 {
@@ -21,6 +23,10 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	ck := new(Clerk)
 	ck.servers = servers
 	// You'll have to add code here.
+	ck.snum = 0
+	ck.lastLeader = 0
+	ck.me = nrand()
+
 	return ck
 }
 
@@ -37,9 +43,31 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 // arguments. and reply must be passed as a pointer.
 //
 func (ck *Clerk) Get(key string) string {
+	//lock
+	ck.snum = ck.snum + 1
+	reply := GetReply{}
+	leaderTry := ck.lastLeader
+	for {
+		args := &GetArgs{Key: key, Snum: ck.snum}
+		reply = GetReply{}
+		ok := ck.servers[leaderTry].Call("KVServer.Get", args, &reply)
+		// You will have to modify this function.
+		//WrongLeader bool
+		//Err         Err
+		//Value       string
+		if !ok || reply.WrongLeader {
+			leaderTry = (leaderTry + 1) % len(ck.servers) //REM: random assign
+			continue
+		}
 
-	// You will have to modify this function.
-	return ""
+		if !reply.WrongLeader {
+			//REM: possible reply.leader op in paper
+			ck.lastLeader = leaderTry
+			break
+		}
+
+	}
+	return reply.Value
 }
 
 //
@@ -54,6 +82,33 @@ func (ck *Clerk) Get(key string) string {
 //
 func (ck *Clerk) PutAppend(key string, value string, op string) {
 	// You will have to modify this function.
+	//lock
+	ck.snum = ck.snum + 1
+	reply := PutAppendReply{}
+	leaderTry := ck.lastLeader
+	for {
+		args := &PutAppendArgs{Key: key, Value: value, Op: op, Snum: ck.snum}
+		reply = PutAppendReply{}
+
+		ok := ck.servers[leaderTry].Call("KVServer.PutAppend", args, &reply)
+		//WrongLeader bool
+		//Err         Err
+		DPrintf4("Cli %d PutAppend %v to server %d. Get %v, %v", ck.me, op, leaderTry, ok, reply.WrongLeader)
+		if !ok || reply.WrongLeader {
+			leaderTry = (leaderTry + 1) % len(ck.servers) //REM: random assign
+			continue
+		}
+
+		if !reply.WrongLeader {
+			//REM: possible reply.leader op in paper
+			ck.lastLeader = leaderTry
+			break
+		}
+
+	}
+	//WrongLeader bool
+	//Err         Err
+	return
 }
 
 func (ck *Clerk) Put(key string, value string) {

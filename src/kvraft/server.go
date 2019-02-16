@@ -10,18 +10,20 @@ import (
 
 const Debug = 0
 
-func DPrintf(format string, a ...interface{}) (n int, err error) {
+func DPrintf4(format string, a ...interface{}) (n int, err error) {
 	if Debug > 0 {
 		log.Printf(format, a...)
 	}
 	return
 }
 
-
 type Op struct {
 	// Your definitions here.
 	// Field names must start with capital letters,
 	// otherwise RPC will break.
+	Optype string
+	Key    string
+	Value  string
 }
 
 type KVServer struct {
@@ -33,15 +35,50 @@ type KVServer struct {
 	maxraftstate int // snapshot if log grows this big
 
 	// Your definitions here.
+	storage map[string]string
+	GetChan (chan bool)
+	PAChan  (chan bool)
 }
-
 
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	// Your code here.
+	if kv.rf.State != 1 {
+		reply.WrongLeader = true
+		//reply rf.VoteFor
+		//reply.Err
+		return
+	}
+	// You'll have to add definitions here.
+	//if args.Snum exist
+	//key := args.Key
+	op := Op{Optype: "Get", Key: args.Key}
+	DPrintf4("Get %v", op)
+	kv.rf.Start(op) //index1, term1, ok
+
+	<-kv.GetChan
+
+	reply.Value = kv.storage[op.Key]
+	reply.WrongLeader = false
+	reply.Err = ""
 }
 
 func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
+	if kv.rf.State != 1 {
+		reply.WrongLeader = true
+		//reply rf.VoteFor
+		//reply.Err
+		return
+	}
+
+	op := Op{Optype: args.Op, Key: args.Key, Value: args.Value}
+	//if args.Snum exist
+	kv.rf.Start(op)
+
+	<-kv.PAChan
+
+	reply.WrongLeader = false
+	reply.Err = ""
 }
 
 //
@@ -78,9 +115,45 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.me = me
 	kv.maxraftstate = maxraftstate
 
+	kv.GetChan = make(chan bool)
+	kv.PAChan = make(chan bool)
 	// You may need initialization code here.
 
 	kv.applyCh = make(chan raft.ApplyMsg)
+	kv.storage = make(map[string]string)
+
+	go func() {
+		DPrintf4("start listening")
+		for m := range kv.applyCh {
+			//do get / append / put
+			DPrintf4("server %d received applych", kv.me)
+			op := m.Command.(Op)
+			switch op.Optype {
+			case "Get": //do nothing
+				kv.mu.Lock()
+				if kv.rf.State == 1 {
+					kv.GetChan <- true
+				}
+				kv.mu.Unlock()
+			case "Put":
+				kv.mu.Lock()
+				if kv.rf.State == 1 {
+					DPrintf4("will put %v %v", op.Key, op.Value)
+					kv.storage[op.Key] = op.Value
+					kv.PAChan <- true
+				}
+				kv.mu.Unlock()
+			case "Append":
+				kv.mu.Lock()
+				if kv.rf.State == 1 {
+					kv.storage[op.Key] = kv.storage[op.Key] + op.Value
+					kv.PAChan <- true
+				}
+				kv.mu.Unlock()
+			}
+		}
+	}()
+
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
 	// You may need initialization code here.

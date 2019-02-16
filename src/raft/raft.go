@@ -498,8 +498,21 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 				if majorityN > len(rf.peers)/2 {
 					rf.CommitIndex = N
 					DPrintfC("Successfully commit index %d by %d", N, rf.me)
+					DPrintUpper("Successfully commit index %d by %d", N, rf.me)
 					rf.persist()
-					go rf.commitlog()
+					//go rf.commitlog()
+					go func() {
+						rf.mu.Lock()
+						defer rf.mu.Unlock()
+						for i := rf.LastApplied + 1; i <= rf.CommitIndex; i++ {
+							DPrintUpper("cnt %d", i)
+							rf.applyCh <- ApplyMsg{Command: rf.Slog[i].Command, CommandIndex: i, CommandValid: true}
+							DPrintUpper("cnt2 %d", i)
+						}
+
+						rf.LastApplied = rf.CommitIndex
+						DPrintUpper("Rep Successfully commit index %d by %d", N, rf.me)
+					}()
 					break
 				}
 			}
@@ -566,6 +579,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	return index, term, isLeader
 }
 
+//
 //
 // the tester calls Kill() when a Raft instance won't
 // be needed again. you are not required to do anything

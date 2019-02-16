@@ -26,7 +26,7 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	ck.snum = 0
 	ck.lastLeader = 0
 	ck.me = nrand()
-
+	DPrintf5("This is client %v", ck.me)
 	return ck
 }
 
@@ -48,9 +48,11 @@ func (ck *Clerk) Get(key string) string {
 	reply := GetReply{}
 	leaderTry := ck.lastLeader
 	for {
-		args := &GetArgs{Key: key, Snum: ck.snum}
+		args := &GetArgs{Key: key, Snum: ck.snum, Cid: ck.me}
 		reply = GetReply{}
+		DPrintf5("before Call %d", leaderTry)
 		ok := ck.servers[leaderTry].Call("KVServer.Get", args, &reply)
+		DPrintf5("after Call")
 		// You will have to modify this function.
 		//WrongLeader bool
 		//Err         Err
@@ -87,7 +89,7 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 	reply := PutAppendReply{}
 	leaderTry := ck.lastLeader
 	for {
-		args := &PutAppendArgs{Key: key, Value: value, Op: op, Snum: ck.snum}
+		args := &PutAppendArgs{Key: key, Value: value, Op: op, Snum: ck.snum, Cid: ck.me}
 		reply = PutAppendReply{}
 
 		ok := ck.servers[leaderTry].Call("KVServer.PutAppend", args, &reply)

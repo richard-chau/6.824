@@ -213,15 +213,15 @@ func GenericTest(t *testing.T, part string, nclients int, unreliable bool, crash
 					DPrintf4("stub %d", cli)
 					if (rand.Int() % 1000) < 500 {
 						nv := "x " + strconv.Itoa(cli) + " " + strconv.Itoa(j) + " y"
-						log.Printf("%d: client new append %v\n", cli, nv)
+						DPrintf0("%d: client new append %v\n", cli, nv)
 						Append(cfg, myck, key, nv)
 						last = NextValue(last, nv)
 						j++
 					} else {
-						log.Printf("%d: client new get %v\n", cli, key)
+						DPrintf0("%d: client new get %v\n", cli, key)
 						v := Get(cfg, myck, key)
 						if v != last {
-							log.Fatalf("get wrong value, key %v, wanted:\n%v\n, got\n%v\n", key, last, v)
+							log.Fatalf("Client %d: get wrong value, key %v, wanted:\n%v\n, got\n%v\n", cli, key, last, v)
 						}
 					}
 					DPrintf4("stub %d", cli)
@@ -272,15 +272,15 @@ func GenericTest(t *testing.T, part string, nclients int, unreliable bool, crash
 		}
 
 		DPrintf4("after partition")
-		// log.Printf("wait for clients\n")
+		// DPrintf0("wait for clients\n")
 		for i := 0; i < nclients; i++ {
-			log.Printf("read from clients %d\n", i)
+			DPrintf0("read from clients %d\n", i)
 			j := <-clnts[i]
-			// if j < 10 {
-			// 	log.Printf("Warning: client %d managed to perform only %d put operations in 1 sec?\n", i, j)
-			// }
+			if j < 10 {
+				DPrintf0("Warning: client %d managed to perform only %d put operations in 1 sec?\n", i, j)
+			}
 			key := strconv.Itoa(i)
-			log.Printf("Check %v for client %d\n", j, i)
+			DPrintf0("Check %v for client %d\n", j, i)
 			v := Get(cfg, ck, key)
 			checkClntAppends(t, i, v, j)
 		}
@@ -509,6 +509,8 @@ func TestOnePartition3A(t *testing.T) {
 	ckp2b := cfg.makeClient(p2) // connect ckp2b to p2
 
 	Put(cfg, ckp1, "1", "14")
+	DPrintf5("－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－")
+
 	check(cfg, t, ckp1, "1", "14")
 
 	cfg.end()
@@ -525,7 +527,7 @@ func TestOnePartition3A(t *testing.T) {
 		Get(cfg, ckp2b, "1") // different clerk in p2
 		done1 <- true
 	}()
-
+	DPrintf5("－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－－")
 	select {
 	case <-done0:
 		t.Fatalf("Put in minority completed")
@@ -533,7 +535,7 @@ func TestOnePartition3A(t *testing.T) {
 		t.Fatalf("Get in minority completed")
 	case <-time.After(time.Second):
 	}
-
+	DPrintf5("---------------------------------------------------------------")
 	check(cfg, t, ckp1, "1", "14")
 	Put(cfg, ckp1, "1", "16")
 	check(cfg, t, ckp1, "1", "16")

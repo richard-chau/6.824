@@ -1,0 +1,6 @@
+can't load package: package 2: cannot find package "2" in any of:
+	/usr/local/go/src/2 (from $GOROOT)
+	/home/winter/Projects/6.824/src/2 (from $GOPATH)
+can't load package: package out: cannot find package "out" in any of:
+	/usr/local/go/src/out (from $GOROOT)
+	/home/winter/Projects/6.824/src/out (from $GOPATH)

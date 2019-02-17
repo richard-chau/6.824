@@ -6,11 +6,12 @@ import (
 	"log"
 	"raft"
 	"sync"
+	"time"
 )
 
-const Debug0 = 1
+const Debug0 = 0
 const Debug4 = 0
-const Debug5 = 1
+const Debug5 = 0
 const MixServer = 0
 
 func DPrintf4(format string, a ...interface{}) (n int, err error) {
@@ -58,12 +59,15 @@ type KVServer struct {
 	storage    map[string]string
 	commFilter map[int64][]int
 
-	GetChan (chan bool)
-	PAChan  (chan bool)
+	//GetChan (chan bool)
+	//PAChan  (chan bool)
+	notify map[int]chan Op
 }
 
 func (kv *KVServer) FilterSnum(cid int64, snum int) bool {
 	DPrintf5("%v, Filter, Len: %d, value %v", cid, len(kv.commFilter[cid]), kv.commFilter[cid])
+	kv.mu.Lock()
+	defer kv.mu.Unlock()
 	que := kv.commFilter[cid]
 	for i := len(que) - 1; i >= 0; i = i - 1 {
 		if que[i] == snum {
@@ -79,6 +83,34 @@ func (kv *KVServer) FilterSnum(cid int64, snum int) bool {
 	return false
 }
 
+func (kv *KVServer) WHLog(op Op) bool {
+	index, _, isLeader := kv.rf.Start(op)
+	WaitTimeout := time.Duration(1000) * time.Millisecond
+	if isLeader {
+
+		kv.mu.Lock()
+		notifyChan, ok := kv.notify[index]
+		if !ok {
+			kv.notify[index] = make(chan Op)
+			notifyChan, _ = kv.notify[index]
+		}
+		kv.mu.Unlock()
+
+		select {
+		case opChan := <-notifyChan:
+			if opChan == op {
+				return true
+			} else {
+				return false
+			}
+		case <-time.After(WaitTimeout): //network partition, is leader, but cannot commit
+			return false
+		}
+	} else { //not leader, or maybe is leader and commit but just get off when recv applyChan
+		return false
+	}
+}
+
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	// Your code here.
 	DPrintf5("me %d", kv.me)
@@ -91,29 +123,39 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	// You'll have to add definitions here.
 	if kv.FilterSnum(args.Cid, args.Snum) {
 		DPrintf5("Filter Get, Len: %d", kv.commFilter[args.Cid])
+		kv.mu.Lock()
 		reply.Value = kv.storage[args.Key]
+		kv.mu.Unlock()
 		reply.WrongLeader = false
 		reply.Err = ""
 		return
+	}
+
+	DPrintf5("%d Get from %v, Key: %v, snum: %d", kv.me, args.Cid, args.Key, args.Snum)
+	op := Op{Optype: "Get", Key: args.Key, Snum: args.Snum, Cid: args.Cid}
+	success := kv.WHLog(op)
+
+	if !success {
+		reply.WrongLeader = true
+	} else {
+		//var exist bool
+		kv.mu.Lock()
+		//reply.Value = kv.storage[op.Key]
+		val, exist := kv.storage[op.Key]
+		kv.mu.Unlock()
+
+		if exist {
+			reply.Value = val
+			reply.Err = ""
+		} else {
+			reply.Err = "No such Key"
+		}
+		reply.WrongLeader = false
+
 	}
 
 	//key := args.Key
-	op := Op{Optype: "Get", Key: args.Key, Snum: args.Snum, Cid: args.Cid}
-	DPrintf5("%d Get from %v, Key: %v, snum: %d", kv.me, args.Cid, args.Key, args.Snum)
-	_, _, isLeader := kv.rf.Start(op) //index1, term1, ok
-	if isLeader {
-		DPrintf5("Here %d", kv.me)
-		<-kv.GetChan
-		DPrintf5("THere")
-		//kv.commFilter[args.Cid] = append(kv.commFilter[args.Cid], args.Snum)
 
-		reply.Value = kv.storage[op.Key]
-		reply.WrongLeader = false
-		reply.Err = ""
-	} else {
-		reply.WrongLeader = true
-		return
-	}
 }
 
 func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
@@ -134,16 +176,25 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 
 	op := Op{Optype: args.Op, Key: args.Key, Value: args.Value, Snum: args.Snum, Cid: args.Cid}
 	DPrintf5("%d Appended from %d, Key: %v, snum: %d", kv.me, args.Cid, args.Key, args.Snum)
-	//if args.Snum exist
-	_, _, isLeader := kv.rf.Start(op) //index1, term1, ok
-	if isLeader {
-		<-kv.PAChan
-		//kv.commFilter[args.Cid] = append(kv.commFilter[args.Cid], args.Snum)
+	success := kv.WHLog(op)
 
+	if success {
+		//var exist bool
+		//reply.Value = kv.storage[op.Key]
 		reply.WrongLeader = false
 		reply.Err = ""
 	} else {
 		reply.WrongLeader = true
+	}
+}
+
+func (kv *KVServer) ApplyOp(op Op) {
+	switch op.Optype {
+	case "Put":
+		kv.storage[op.Key] = op.Value
+	case "Append":
+		kv.storage[op.Key] = kv.storage[op.Key] + op.Value
+	default:
 		return
 	}
 }
@@ -183,8 +234,9 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 
 	kv.maxraftstate = maxraftstate
 
-	kv.GetChan = make(chan bool)
-	kv.PAChan = make(chan bool)
+	//kv.GetChan = make(chan bool)
+	//kv.PAChan = make(chan bool)
+	kv.notify = make(map[int]chan Op) //->chan array
 	// You may need initialization code here.
 
 	kv.applyCh = make(chan raft.ApplyMsg)
@@ -197,46 +249,20 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 			//do get / append / put
 			DPrintf5("server %d received applych", kv.me)
 			op := m.Command.(Op)
-			switch op.Optype {
-			case "Get": //do nothing
-				kv.mu.Lock()
-				if kv.rf.State == 1 {
-					if kv.commFilter[op.Cid] == nil {
-						kv.commFilter[op.Cid] = make([]int, 0)
-					}
-					kv.commFilter[op.Cid] = append(kv.commFilter[op.Cid], op.Snum)
-					kv.GetChan <- true
 
-				}
-
-				kv.mu.Unlock()
-			case "Put":
-				kv.mu.Lock()
-				if kv.rf.State == 1 {
-					DPrintf5("%v will put %v %v with snum %d-----------------------------", op.Cid, op.Key, op.Value, op.Snum)
-					if kv.commFilter[op.Cid] == nil {
-						kv.commFilter[op.Cid] = make([]int, 0)
-					}
-					kv.commFilter[op.Cid] = append(kv.commFilter[op.Cid], op.Snum)
-					kv.storage[op.Key] = op.Value
-
-					kv.PAChan <- true
-				}
-				kv.mu.Unlock()
-			case "Append":
-				kv.mu.Lock()
-				if kv.rf.State == 1 {
-					DPrintf5("%v will append %v %v with snum %d--------------------------------------", op.Cid, op.Key, op.Value, op.Snum)
-					if kv.commFilter[op.Cid] == nil {
-						kv.commFilter[op.Cid] = make([]int, 0)
-					}
-
-					kv.commFilter[op.Cid] = append(kv.commFilter[op.Cid], op.Snum)
-					kv.storage[op.Key] = kv.storage[op.Key] + op.Value
-					kv.PAChan <- true
-				}
-				kv.mu.Unlock()
+			kv.mu.Lock()
+			//DPrintf5("%v will put %v %v with snum %d-----------------------------", op.Cid, op.Key, op.Value, op.Snum)
+			if kv.commFilter[op.Cid] == nil {
+				kv.commFilter[op.Cid] = make([]int, 0)
 			}
+			kv.commFilter[op.Cid] = append(kv.commFilter[op.Cid], op.Snum)
+			kv.ApplyOp(op)
+
+			notifyChan, ok := kv.notify[m.CommandIndex]
+			if ok {
+				notifyChan <- op
+			}
+			kv.mu.Unlock()
 		}
 	}()
 

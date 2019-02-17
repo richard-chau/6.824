@@ -1,4 +1,1 @@
 Test: unreliable net, many clients (3A) ...
-  ... Passed --  17.2  5  2087  560
-PASS
-ok  	kvraft	17.220s

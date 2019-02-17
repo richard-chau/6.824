@@ -66,8 +66,8 @@ type KVServer struct {
 
 func (kv *KVServer) FilterSnum(cid int64, snum int) bool {
 	DPrintf5("%v, Filter, Len: %d, value %v", cid, len(kv.commFilter[cid]), kv.commFilter[cid])
-	kv.mu.Lock()
-	defer kv.mu.Unlock()
+	//kv.mu.Lock()
+	//defer kv.mu.Unlock()
 	que := kv.commFilter[cid]
 	for i := len(que) - 1; i >= 0; i = i - 1 {
 		if que[i] == snum {
@@ -252,11 +252,13 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 
 			kv.mu.Lock()
 			//DPrintf5("%v will put %v %v with snum %d-----------------------------", op.Cid, op.Key, op.Value, op.Snum)
-			if kv.commFilter[op.Cid] == nil {
-				kv.commFilter[op.Cid] = make([]int, 0)
+			if !kv.FilterSnum(op.Cid, op.Snum) {
+				if kv.commFilter[op.Cid] == nil {
+					kv.commFilter[op.Cid] = make([]int, 0)
+				}
+				kv.commFilter[op.Cid] = append(kv.commFilter[op.Cid], op.Snum)
+				kv.ApplyOp(op)
 			}
-			kv.commFilter[op.Cid] = append(kv.commFilter[op.Cid], op.Snum)
-			kv.ApplyOp(op)
 
 			notifyChan, ok := kv.notify[m.CommandIndex]
 			if ok {

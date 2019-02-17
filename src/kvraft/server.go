@@ -12,7 +12,8 @@ import (
 const Debug0 = 0
 const Debug4 = 0
 const Debug5 = 0
-const MixServer = 0
+const MixServer = 1
+const Conservative = 0
 
 func DPrintf4(format string, a ...interface{}) (n int, err error) {
 	if Debug4 > 0 {
@@ -56,8 +57,10 @@ type KVServer struct {
 	maxraftstate int // snapshot if log grows this big
 
 	// Your definitions here.
-	storage    map[string]string
-	commFilter map[int64][]int
+	storage map[string]string
+
+	commFilter  map[int64][]int
+	commFilterX map[int64]int
 
 	//GetChan (chan bool)
 	//PAChan  (chan bool)
@@ -65,45 +68,48 @@ type KVServer struct {
 }
 
 func (kv *KVServer) FilterSnum(cid int64, snum int) bool {
-	DPrintf5("%v, Filter, Len: %d, value %v", cid, len(kv.commFilter[cid]), kv.commFilter[cid])
+	//DPrintf5("%v, Filter, Len: %d, value %v", cid, len(kv.commFilter[cid]), kv.commFilter[cid])
 	//kv.mu.Lock()
 	//defer kv.mu.Unlock()
 	que := kv.commFilter[cid]
 	for i := len(que) - 1; i >= 0; i = i - 1 {
 		if que[i] == snum {
-			DPrintf5("%d filter success cli %v with snum=%d", kv.me, cid, snum)
+			//DPrintf5("%d filter success cli %v with snum=%d", kv.me, cid, snum)
 			return true
 		}
 		if que[i] < snum {
-			DPrintf5("%d filter non-exist cli %v with snum=%d", kv.me, cid, snum)
+			//DPrintf5("%d filter non-exist cli %v with snum=%d", kv.me, cid, snum)
 			return false
 		}
 	}
-	DPrintf5("%d filter non-exist cli %v with snum=%d", kv.me, cid, snum)
+
+	//DPrintf5("%d filter non-exist cli %v with snum=%d", kv.me, cid, snum)
 	return false
 }
 
 func (kv *KVServer) WHLog(op Op) bool {
 	index, _, isLeader := kv.rf.Start(op)
-	WaitTimeout := time.Duration(1000) * time.Millisecond
+	//WaitTimeout := time.Duration(1200) * time.Millisecond
 	if isLeader {
-
 		kv.mu.Lock()
 		notifyChan, ok := kv.notify[index]
 		if !ok {
-			kv.notify[index] = make(chan Op)
-			notifyChan, _ = kv.notify[index]
+			//kv.notify[index] = make(chan Op)
+			//notifyChan, _ = kv.notify[index]
+			notifyChan = make(chan Op, 1)
+			kv.notify[index] = notifyChan
 		}
 		kv.mu.Unlock()
 
 		select {
-		case opChan := <-notifyChan:
-			if opChan == op {
-				return true
-			} else {
-				return false
-			}
-		case <-time.After(WaitTimeout): //network partition, is leader, but cannot commit
+		case opChan := <-notifyChan: //kv.notify[index]: //notifyChan:
+			return opChan == op
+			//if opChan == op {
+			//	return true
+			//} else {
+			//	return false
+			//}
+		case <-time.After(800 * time.Millisecond): //network partition, is leader, but cannot commit
 			return false
 		}
 	} else { //not leader, or maybe is leader and commit but just get off when recv applyChan
@@ -113,21 +119,43 @@ func (kv *KVServer) WHLog(op Op) bool {
 
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	// Your code here.
-	DPrintf5("me %d", kv.me)
-	if kv.rf.State != 1 {
-		reply.WrongLeader = true
-		//reply rf.VoteFor
-		//reply.Err
-		return
-	}
+	/*
+		DPrintf5("me %d", kv.me)
+		if kv.rf.State != 1 {
+			reply.WrongLeader = true
+			//reply rf.VoteFor
+			//reply.Err
+			return
+		}
+	*/
+
+	jumpOutFlag := false
 	// You'll have to add definitions here.
-	if kv.FilterSnum(args.Cid, args.Snum) {
-		DPrintf5("Filter Get, Len: %d", kv.commFilter[args.Cid])
-		kv.mu.Lock()
-		reply.Value = kv.storage[args.Key]
-		kv.mu.Unlock()
-		reply.WrongLeader = false
-		reply.Err = ""
+	kv.mu.Lock() //otherwise, may cause problems concurrent write/read
+	if Conservative > 0 {
+		if kv.FilterSnum(args.Cid, args.Snum) {
+			DPrintf5("Filter Get, Len: %d", kv.commFilter[args.Cid])
+			//kv.mu.Lock()
+			reply.Value = kv.storage[args.Key]
+			//kv.mu.Unlock()
+			reply.WrongLeader = false
+			reply.Err = ""
+			//return
+			jumpOutFlag = true
+		}
+	} else {
+		if snum, ok := kv.commFilterX[args.Cid]; ok && args.Snum <= snum {
+			DPrintf5("Filter Get, Len: %d", kv.commFilter[args.Cid])
+			//kv.mu.Lock()
+			reply.Value = kv.storage[args.Key]
+			//kv.mu.Unlock()
+			reply.WrongLeader = false
+			reply.Err = ""
+			jumpOutFlag = true
+		}
+	}
+	kv.mu.Unlock()
+	if jumpOutFlag {
 		return
 	}
 
@@ -139,18 +167,19 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 		reply.WrongLeader = true
 	} else {
 		//var exist bool
+		reply.WrongLeader = false
+
 		kv.mu.Lock()
 		//reply.Value = kv.storage[op.Key]
-		val, exist := kv.storage[op.Key]
+		val, exist := kv.storage[args.Key]
 		kv.mu.Unlock()
 
 		if exist {
 			reply.Value = val
-			reply.Err = ""
+			reply.Err = OK
 		} else {
-			reply.Err = "No such Key"
+			reply.Err = ErrNoKey
 		}
-		reply.WrongLeader = false
 
 	}
 
@@ -160,17 +189,31 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 
 func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
-	if kv.rf.State != 1 {
-		reply.WrongLeader = true
-		//reply rf.VoteFor
-		//reply.Err
-		return
+	/*
+		if kv.rf.State != 1 {
+			reply.WrongLeader = true
+			return
+		}
+	*/
+	jumpOutFlag := false
+	kv.mu.Lock()
+	if Conservative > 0 {
+		if kv.FilterSnum(args.Cid, args.Snum) {
+			DPrintf5("Filter Put/Append, Len: %d", kv.commFilter[args.Cid])
+			reply.WrongLeader = false
+			reply.Err = ""
+			jumpOutFlag = true
+		}
+	} else {
+		if snum, ok := kv.commFilterX[args.Cid]; ok && args.Snum <= snum {
+			DPrintf5("Filter Put/Append, Len: %d", kv.commFilter[args.Cid])
+			reply.WrongLeader = false
+			reply.Err = ""
+			jumpOutFlag = true
+		}
 	}
-
-	if kv.FilterSnum(args.Cid, args.Snum) {
-		DPrintf5("Filter Put/Append, Len: %d", kv.commFilter[args.Cid])
-		reply.WrongLeader = false
-		reply.Err = ""
+	kv.mu.Unlock()
+	if jumpOutFlag {
 		return
 	}
 
@@ -182,7 +225,7 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 		//var exist bool
 		//reply.Value = kv.storage[op.Key]
 		reply.WrongLeader = false
-		reply.Err = ""
+		reply.Err = OK
 	} else {
 		reply.WrongLeader = true
 	}
@@ -194,8 +237,8 @@ func (kv *KVServer) ApplyOp(op Op) {
 		kv.storage[op.Key] = op.Value
 	case "Append":
 		kv.storage[op.Key] = kv.storage[op.Key] + op.Value
-	default:
-		return
+		//default:
+		//	return
 	}
 }
 
@@ -241,23 +284,44 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 
 	kv.applyCh = make(chan raft.ApplyMsg)
 	kv.storage = make(map[string]string)
-	kv.commFilter = make(map[int64][]int)
+
+	if Conservative > 0 {
+		kv.commFilter = make(map[int64][]int)
+	} else {
+		kv.commFilterX = make(map[int64]int)
+	}
+	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
 	go func() {
 		DPrintf5("start listening %d", kv.me)
-		for m := range kv.applyCh {
+		for { //m := range kv.applyCh {
+			m := <-kv.applyCh
+
 			//do get / append / put
 			DPrintf5("server %d received applych", kv.me)
 			op := m.Command.(Op)
 
 			kv.mu.Lock()
 			//DPrintf5("%v will put %v %v with snum %d-----------------------------", op.Cid, op.Key, op.Value, op.Snum)
-			if !kv.FilterSnum(op.Cid, op.Snum) {
-				if kv.commFilter[op.Cid] == nil {
-					kv.commFilter[op.Cid] = make([]int, 0)
+			if Conservative > 0 {
+				if op.Optype != "Get" && !kv.FilterSnum(op.Cid, op.Snum) {
+
+					kv.ApplyOp(op)
+
+					if kv.commFilter[op.Cid] == nil {
+						kv.commFilter[op.Cid] = make([]int, 0)
+					}
+					kv.commFilter[op.Cid] = append(kv.commFilter[op.Cid], op.Snum)
+
+					//kv.ApplyOp(op)
 				}
-				kv.commFilter[op.Cid] = append(kv.commFilter[op.Cid], op.Snum)
-				kv.ApplyOp(op)
+			} else {
+				if op.Optype != "Get" {
+					if snum, ok := kv.commFilterX[op.Cid]; !ok || op.Snum > snum {
+						kv.ApplyOp(op)
+						kv.commFilterX[op.Cid] = op.Snum
+					}
+				}
 			}
 
 			notifyChan, ok := kv.notify[m.CommandIndex]
@@ -267,8 +331,6 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 			kv.mu.Unlock()
 		}
 	}()
-
-	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
 	// You may need initialization code here.
 

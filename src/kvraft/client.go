@@ -42,6 +42,8 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 // must match the declared types of the RPC handler function's
 // arguments. and reply must be passed as a pointer.
 //
+
+/*
 func (ck *Clerk) Get(key string) string {
 	//lock
 	ck.snum = ck.snum + 1
@@ -71,6 +73,42 @@ func (ck *Clerk) Get(key string) string {
 	}
 	return reply.Value
 }
+*/
+
+func (ck *Clerk) Get(key string) string {
+	//lock
+	ck.snum = ck.snum + 1
+	//reply := GetReply{}
+	args := &GetArgs{Key: key, Snum: ck.snum, Cid: ck.me}
+	reply := GetReply{}
+	for {
+		//
+		reply = GetReply{}
+		DPrintf5("before Call %d", ck.lastLeader)
+		ok := ck.servers[ck.lastLeader].Call("KVServer.Get", args, &reply)
+		DPrintf5("after Call")
+		// You will have to modify this function.
+		//WrongLeader bool
+		//Err         Err
+		//Value       string
+		if !ok || reply.WrongLeader {
+			ck.lastLeader = (ck.lastLeader + 1) % len(ck.servers) //REM: random assign
+			continue
+		}
+
+		if !reply.WrongLeader {
+			//REM: possible reply.leader op in paper
+
+			break
+		}
+
+	}
+
+	if reply.Err == ErrNoKey {
+		return ""
+	}
+	return reply.Value
+}
 
 //
 // shared by Put and Append.
@@ -87,23 +125,24 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 	//lock
 	ck.snum = ck.snum + 1
 	reply := PutAppendReply{}
-	leaderTry := ck.lastLeader
+	args := &PutAppendArgs{Key: key, Value: value, Op: op, Snum: ck.snum, Cid: ck.me}
+
+	//leaderTry := ck.lastLeader
 	for {
-		args := &PutAppendArgs{Key: key, Value: value, Op: op, Snum: ck.snum, Cid: ck.me}
 		reply = PutAppendReply{}
 
-		ok := ck.servers[leaderTry].Call("KVServer.PutAppend", args, &reply)
+		ok := ck.servers[ck.lastLeader].Call("KVServer.PutAppend", args, &reply)
 		//WrongLeader bool
 		//Err         Err
-		DPrintf4("Cli %d PutAppend %v to server %d. Get %v, %v", ck.me, op, leaderTry, ok, reply.WrongLeader)
+		DPrintf4("Cli %d PutAppend %v to server %d. Get %v, %v", ck.me, op, ck.lastLeader, ok, reply.WrongLeader)
 		if !ok || reply.WrongLeader {
-			leaderTry = (leaderTry + 1) % len(ck.servers) //REM: random assign
+			ck.lastLeader = (ck.lastLeader + 1) % len(ck.servers) //REM: random assign
 			continue
 		}
 
 		if !reply.WrongLeader {
 			//REM: possible reply.leader op in paper
-			ck.lastLeader = leaderTry
+			//ck.lastLeader = leaderTry
 			break
 		}
 

@@ -104,13 +104,15 @@ func (kv *KVServer) WHLog(op Op) bool {
 		select {
 		case opChan := <-notifyChan: //kv.notify[index]: //notifyChan:
 			return opChan == op
-			//if opChan == op {
-			//	return true
+			//if opChan != op {
+			//	log.Println(opChan, op)
+			//}
+			//return true
 			//} else {
 			//	return false
 			//}
 		case <-time.After(800 * time.Millisecond): //network partition, is leader, but cannot commit
-			return false
+			return false // 200 is okay in this setting
 		}
 	} else { //not leader, or maybe is leader and commit but just get off when recv applyChan
 		return false
@@ -119,15 +121,14 @@ func (kv *KVServer) WHLog(op Op) bool {
 
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	// Your code here.
-	/*
-		DPrintf5("me %d", kv.me)
-		if kv.rf.State != 1 {
-			reply.WrongLeader = true
-			//reply rf.VoteFor
-			//reply.Err
-			return
-		}
-	*/
+
+	DPrintf5("me %d", kv.me)
+	if kv.rf.State != 1 {
+		reply.WrongLeader = true
+		//reply rf.VoteFor
+		//reply.Err
+		return
+	}
 
 	jumpOutFlag := false
 	// You'll have to add definitions here.
@@ -189,12 +190,12 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 
 func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
-	/*
-		if kv.rf.State != 1 {
-			reply.WrongLeader = true
-			return
-		}
-	*/
+
+	if kv.rf.State != 1 {
+		reply.WrongLeader = true
+		return
+	}
+
 	jumpOutFlag := false
 	kv.mu.Lock()
 	if Conservative > 0 {

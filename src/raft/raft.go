@@ -138,6 +138,9 @@ func (rf *Raft) InstallSnapShot(args *InstallSnapShotArgs, reply *InstallSnapSho
 
 	//rf.CurrentTerm = args.Term
 	trueIdx := args.LastIncludedIndex
+	if trueIdx+1 < rf.LastIncludedIndex {
+		return
+	}
 
 	var newSlog []SLogEntry
 	newSlog = append(newSlog, SLogEntry{Term: args.LastIncludedTerm, Command: nil}) //change 0 to args.LastIncludedTerm
@@ -529,29 +532,38 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		return // without return, report error
 	}
 
-	DPrintNew("Raft side  %d Install: args.PrevIndex: %d, len: %d, lastIncludedIndex: %d, persist size: %d", rf.me, args.PrevLogIndex, len(rf.Slog), rf.LastIncludedIndex, rf.GetPersistSize())
+	//DPrintNew("Raft side  %d Install: args.PrevIndex: %d, len: %d, lastIncludedIndex: %d, persist size: %d", rf.me, args.PrevLogIndex, len(rf.Slog), rf.LastIncludedIndex, rf.GetPersistSize())
 
-	var term int
-	if args.PrevLogIndex == rf.LastIncludedIndex {
-		term = rf.LastIncludedTerm
-	} else {
-		term = rf.Slog[args.PrevLogIndex-rf.LastIncludedIndex].Term
-	}
+	//var term int
+	//if args.PrevLogIndex == rf.LastIncludedIndex {
+	//	term = rf.LastIncludedTerm
+	//} else {
+	//	term = rf.Slog[args.PrevLogIndex-rf.LastIncludedIndex].Term
+	//}
 
-	if args.PrevLogIndex > 0 && // > 0??
-		//rf.Slog[args.PrevLogIndex-rf.LastIncludedIndex].Term != args.PrevLogTerm {
-		term != args.PrevLogTerm {
+	if args.PrevLogIndex < rf.LastIncludedIndex {
+		reply.CTerm = rf.CurrentTerm
+		reply.Success = false
+
+		rf.persist()
+		return
+	} ////!!!!
+
+	if args.PrevLogIndex > rf.LastIncludedIndex &&
+		//if args.PrevLogIndex > 0 && // > 0??
+		rf.Slog[args.PrevLogIndex-rf.LastIncludedIndex].Term != args.PrevLogTerm {
+		//term != args.PrevLogTerm {
 		reply.CTerm = rf.CurrentTerm
 		reply.Success = false
 
 		if rf.OptimizeMultipleEntries == 1 {
-			//term := rf.Slog[args.PrevLogIndex-rf.LastIncludedIndex].Term
+			term := rf.Slog[args.PrevLogIndex-rf.LastIncludedIndex].Term
 
 			//for reply.NextTryIndex = args.PrevLogIndex - 1; reply.NextTryIndex > 0 && rf.Slog[reply.NextTryIndex-rf.LastIncludedIndex].Term == term; reply.NextTryIndex-- {
 			//}
 
 			//DPrintNew("Raft side  %d Install: NextTryIndex: %d, len: %d, lastIncludedIndex: %d, persist size: %d", rf.me, args.PrevLogIndex-1, len(rf.Slog), rf.LastIncludedIndex, rf.GetPersistSize())
-			for reply.NextTryIndex = args.PrevLogIndex - 1; reply.NextTryIndex > 0 && rf.Slog[reply.NextTryIndex-rf.LastIncludedIndex].Term == term; reply.NextTryIndex-- {
+			for reply.NextTryIndex = args.PrevLogIndex - 1; reply.NextTryIndex > rf.LastIncludedIndex && rf.Slog[reply.NextTryIndex-rf.LastIncludedIndex].Term == term; reply.NextTryIndex-- {
 				//	DPrintNew("Raft side  %d Install: NextTryIndex: %d, len: %d, lastIncludedIndex: %d, persist size: %d", rf.me, reply.NextTryIndex, len(rf.Slog), rf.LastIncludedIndex, rf.GetPersistSize())
 			}
 			// for reply.NextTryIndex = args.PrevLogIndex - 1; reply.NextTryIndex > 0; reply.NextTryIndex-- {
@@ -577,6 +589,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	//If an existing entry conflicts with a new one (same index
 	//but different terms), delete the existing entry and all that
 	//follow it
+	DPrintNew("Raft side  %d Install: args.PrevIndex: %d, len: %d, lastIncludedIndex: %d, persist size: %d", rf.me, args.PrevLogIndex, len(rf.Slog), rf.LastIncludedIndex, rf.GetPersistSize())
 	if len(args.Entries) != 0 &&
 		rf.GetLastLogIndex() >= args.PrevLogIndex && //entry conflict, first must have the entry. len(rf.Slog) - 1 >= , not len(rf.Slog), not  len(rf.Slog)-1 >
 		//actually this must satisfy, so we can remove this , will not affect working

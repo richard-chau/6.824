@@ -121,13 +121,11 @@ func (rf *Raft) DoSnapshot(ckp []byte, trueIdx int) {
 		return
 	}
 
-	DPrintNew("Raft side: TrueIdx: %d, old lastIncludedIndex: %d, persist size: %d", trueIdx, rf.LastIncludedIndex, rf.GetPersistSize())
-
 	var newSlog []SLogEntry
 	newSlog = append(newSlog, SLogEntry{Term: 0, Command: nil})
 	//for i := idx - rf.LastIncludedIndex; i >= 1; i-- {
 	//}
-	newSlog = append(newSlog, rf.Slog[trueIdx+1-rf.LastIncludedIndex:]...) // only keep the log after trueIdx
+	newSlog = append(newSlog, rf.Slog[trueIdx+1-rf.LastIncludedIndex:]...)
 	//abandon old log
 	rf.LastIncludedTerm = rf.Slog[trueIdx-rf.LastIncludedIndex].Term
 	rf.LastIncludedIndex = trueIdx //rf.GetLastLogIndex()
@@ -151,8 +149,6 @@ func (rf *Raft) DoSnapshot(ckp []byte, trueIdx int) {
 	data1 = append(data1, ckp...)
 
 	rf.persister.SaveStateAndSnapshot(state, data1)
-
-	DPrintNew("Raft side finish: TrueIdx: %d, new lastIncludedIndex: %d, persist size: %d", trueIdx, rf.LastIncludedIndex, rf.GetPersistSize())
 }
 
 func (rf *Raft) readSnapshot(data []byte) {
@@ -299,9 +295,9 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 }
 
 func (rf *Raft) UpToDate(argIndex int, argTerm int) bool {
-	//if len(rf.Slog) == 0 {
-	//	return true
-	//}
+	if len(rf.Slog) == 0 {
+		return true
+	}
 	rfLogTerm := rf.GetLastLogTerm()
 
 	if argTerm > rfLogTerm { //rf.CurrentTerm
@@ -674,10 +670,7 @@ func (rf *Raft) GetLastLogIndex() int {
 }
 
 func (rf *Raft) GetLastLogTerm() int {
-	if len(rf.Slog)-1 == 0 && rf.LastIncludedIndex != 0 {
-		return rf.LastIncludedTerm
-	}
-	return rf.Slog[len(rf.Slog)-1].Term //len(rf.Slog) >= 1 ////~~~~
+	return rf.Slog[len(rf.Slog)-1-rf.LastIncludedIndex].Term //len(rf.Slog) >= 1
 
 }
 
@@ -686,10 +679,7 @@ func (rf *Raft) GetPrevLogIndex(i int) int {
 }
 
 func (rf *Raft) GetPrevLogTerm(i int) int {
-	if rf.NextIndex[i]-1 == rf.LastIncludedIndex {
-		return rf.LastIncludedTerm
-	}
-	return rf.Slog[rf.NextIndex[i]-1-rf.LastIncludedIndex].Term ////~~~~
+	return rf.Slog[rf.NextIndex[i]-1-rf.LastIncludedIndex].Term
 }
 
 //
@@ -824,9 +814,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 						if i != rf.me && rf.State == 1 { //rf.State may be
 							//modified by other case
 							//rf.mu.Lock()
-							//DPrintfB("Me: %d (Term %d, loglen %d), send to %d, PrevLogIndex: %d", rf.me, rf.CurrentTerm, len(rf.Slog), i, rf.GetPrevLogIndex(i))
-							DPrintNew("Me: %d (Term %d, loglen %d), send to %d, PrevLogIndex: %d, NextIndex: %d, lastincludedIndex: %d", rf.me, rf.CurrentTerm, len(rf.Slog), i, rf.GetPrevLogIndex(i), rf.NextIndex[i], rf.LastIncludedIndex)
-
+							DPrintfB("Me: %d (Term %d, loglen %d), send to %d, PrevLogIndex: %d", rf.me, rf.CurrentTerm, len(rf.Slog), i, rf.GetPrevLogIndex(i))
 							args := &AppendEntriesArgs{Term: rf.CurrentTerm,
 								LeaderId:     rf.me,
 								PrevLogIndex: rf.GetPrevLogIndex(i),

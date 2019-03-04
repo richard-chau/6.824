@@ -1,6 +1,8 @@
 package raftkv
 
 import (
+	"bytes"
+	"encoding/gob"
 	"labgob"
 	"labrpc"
 	"log"
@@ -14,6 +16,7 @@ const Debug4 = 0
 const Debug5 = 0
 const MixServer = 1
 const Conservative = 0
+const DebugNew = 1
 
 func DPrintf4(format string, a ...interface{}) (n int, err error) {
 	if Debug4 > 0 {
@@ -31,6 +34,13 @@ func DPrintf5(format string, a ...interface{}) (n int, err error) {
 
 func DPrintf0(format string, a ...interface{}) (n int, err error) {
 	if Debug0 > 0 {
+		log.Printf(format, a...)
+	}
+	return
+}
+
+func DPrintNew(format string, a ...interface{}) (n int, err error) {
+	if DebugNew > 0 {
 		log.Printf(format, a...)
 	}
 	return
@@ -294,9 +304,26 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
 	go func() {
-		DPrintf5("start listening %d", kv.me)
+		DPrintNew("start listening %d", kv.me)
 		for { //m := range kv.applyCh {
 			m := <-kv.applyCh
+			if m.UseSnapshot {
+				var LastIncludedIndex int
+				var LastIncludedTerm int
+
+				r := bytes.NewBuffer(m.Snapshot)
+				d := gob.NewDecoder(r)
+
+				kv.mu.Lock()
+				d.Decode(&LastIncludedIndex)
+				d.Decode(&LastIncludedTerm)
+				kv.storage = make(map[string]string)
+				kv.commFilterX = make(map[int64]int)
+				d.Decode(&kv.storage)
+				d.Decode(&kv.commFilterX)
+				kv.mu.Unlock()
+				continue
+			}
 
 			//do get / append / put
 			DPrintf5("server %d received applych", kv.me)
@@ -329,6 +356,21 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 			if ok {
 				notifyChan <- op
 			}
+			DPrintNew("cmdidx: %d, logsize %d", m.CommandIndex, kv.rf.GetPersistSize())
+			if kv.maxraftstate != -1 && kv.rf.GetPersistSize() > kv.maxraftstate {
+				//only for non-conservative
+
+				DPrintNew("KV side: me: %d, cmdidx: %d, logsize %d", kv.me, m.CommandIndex, kv.rf.GetPersistSize())
+				w := new(bytes.Buffer)
+				e := labgob.NewEncoder(w)
+				e.Encode(kv.storage)
+				e.Encode(kv.commFilterX)
+				data := w.Bytes()
+
+				go kv.rf.DoSnapshot(data, m.CommandIndex) //may use another index
+
+			}
+
 			kv.mu.Unlock()
 		}
 	}()

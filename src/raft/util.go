@@ -7,7 +7,7 @@ const Debug = 0
 const DebugB = 0
 const DebugC = 0
 const DebugUpper = 0
-const DebugNew = 1
+const DebugNew = 0
 
 func DPrintf(format string, a ...interface{}) (n int, err error) {
 	if Debug > 0 {

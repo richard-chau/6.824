@@ -113,6 +113,96 @@ func (rf *Raft) GetPersistSize() int {
 	return rf.persister.RaftStateSize()
 }
 
+type InstallSnapShotArgs struct {
+	Term              int
+	LeadId            int
+	LastIncludedIndex int
+	LastIncludedTerm  int
+	Data              []byte
+}
+
+type InstallSnapShotReply struct {
+	Term int
+}
+
+func (rf *Raft) InstallSnapShot(args *InstallSnapShotArgs, reply *InstallSnapShotReply) {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	if args.Term < rf.CurrentTerm {
+		reply.Term = rf.CurrentTerm
+		return
+	}
+
+	rf.State = -1
+	rf.AppendEntriesChan <- true
+
+	//rf.CurrentTerm = args.Term
+	trueIdx := args.LastIncludedIndex
+
+	var newSlog []SLogEntry
+	newSlog = append(newSlog, SLogEntry{Term: args.LastIncludedTerm, Command: nil}) //change 0 to args.LastIncludedTerm
+	//for i := idx - rf.LastIncludedIndex; i >= 1; i-- {
+	//}
+
+	//DPrintNew("Raft side  %d Install: TrueIdx: %d, len: %d, lastIncludedIndex: %d, persist size: %d", rf.me, trueIdx, len(rf.Slog), rf.LastIncludedIndex, rf.GetPersistSize())
+	if trueIdx+1-rf.LastIncludedIndex < len(rf.Slog) {
+		newSlog = append(newSlog, rf.Slog[trueIdx+1-rf.LastIncludedIndex:]...) // only keep the log after trueIdx, often do not have such log, just lag behind
+	}
+	//abandon old log
+	//rf.LastIncludedTerm = rf.Slog[trueIdx-rf.LastIncludedIndex].Term
+	rf.LastIncludedTerm = args.LastIncludedTerm
+	rf.LastIncludedIndex = trueIdx //rf.GetLastLogIndex()
+
+	rf.Slog = nil
+	rf.Slog = newSlog
+	rf.LastApplied = args.LastIncludedIndex
+	rf.CommitIndex = args.LastIncludedIndex
+
+	msg := ApplyMsg{UseSnapshot: true, Snapshot: args.Data}
+
+	//rf.persist()
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	e.Encode(rf.CurrentTerm)
+	e.Encode(rf.VoteFor)
+	e.Encode(rf.Slog)
+	state := w.Bytes()
+
+	w1 := new(bytes.Buffer)
+	e1 := labgob.NewEncoder(w1)
+	e1.Encode(rf.LastIncludedIndex)
+	e1.Encode(rf.LastIncludedTerm)
+	data1 := w1.Bytes()
+	data1 = append(data1, args.Data...) ///
+
+	rf.persister.SaveStateAndSnapshot(state, data1)
+
+	go func() {
+		rf.applyCh <- msg
+	}()
+
+}
+
+func (rf *Raft) SendInstallSnapShot(server int, args *InstallSnapShotArgs, reply *InstallSnapShotReply) bool {
+	ok := rf.peers[server].Call("Raft.InstallSnapShot", args, reply)
+
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
+	if ok {
+		if reply.Term > rf.CurrentTerm {
+			rf.CurrentTerm = reply.Term
+			rf.State = -1
+			rf.VoteFor = -1
+			return ok
+		}
+
+		rf.MatchIndex[server] = args.LastIncludedIndex
+		rf.NextIndex[server] = args.LastIncludedIndex + 1
+	}
+	return ok
+}
+
 func (rf *Raft) DoSnapshot(ckp []byte, trueIdx int) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
@@ -121,15 +211,18 @@ func (rf *Raft) DoSnapshot(ckp []byte, trueIdx int) {
 		return
 	}
 
-	DPrintNew("Raft side: TrueIdx: %d, old lastIncludedIndex: %d, persist size: %d", trueIdx, rf.LastIncludedIndex, rf.GetPersistSize())
+	//DPrintNew("Raft side: TrueIdx: %d, old lastIncludedIndex: %d, persist size: %d", trueIdx, rf.LastIncludedIndex, rf.GetPersistSize())
 
 	var newSlog []SLogEntry
-	newSlog = append(newSlog, SLogEntry{Term: 0, Command: nil})
+	rf.LastIncludedTerm = rf.Slog[trueIdx-rf.LastIncludedIndex].Term
+	newSlog = append(newSlog, SLogEntry{Term: rf.LastIncludedTerm, Command: nil})
 	//for i := idx - rf.LastIncludedIndex; i >= 1; i-- {
 	//}
+	//if trueIdx+1-rf.LastIncludedIndex < len(rf.Slog) {
 	newSlog = append(newSlog, rf.Slog[trueIdx+1-rf.LastIncludedIndex:]...) // only keep the log after trueIdx
+	//}
 	//abandon old log
-	rf.LastIncludedTerm = rf.Slog[trueIdx-rf.LastIncludedIndex].Term
+
 	rf.LastIncludedIndex = trueIdx //rf.GetLastLogIndex()
 
 	rf.Slog = nil
@@ -152,7 +245,7 @@ func (rf *Raft) DoSnapshot(ckp []byte, trueIdx int) {
 
 	rf.persister.SaveStateAndSnapshot(state, data1)
 
-	DPrintNew("Raft side finish: TrueIdx: %d, new lastIncludedIndex: %d, persist size: %d", trueIdx, rf.LastIncludedIndex, rf.GetPersistSize())
+	//DPrintNew("Raft side finish: TrueIdx: %d, new lastIncludedIndex: %d, persist size: %d", trueIdx, rf.LastIncludedIndex, rf.GetPersistSize())
 }
 
 func (rf *Raft) readSnapshot(data []byte) {
@@ -168,6 +261,9 @@ func (rf *Raft) readSnapshot(data []byte) {
 	d.Decode(&rf.LastIncludedTerm)
 	//d.Decode(ckp)
 	//rf.Slog = ?
+
+	rf.CommitIndex = rf.LastIncludedIndex
+	rf.LastApplied = rf.LastIncludedIndex
 
 	msg := ApplyMsg{UseSnapshot: true, Snapshot: data}
 	go func() {
@@ -432,16 +528,42 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		rf.persist()
 		return // without return, report error
 	}
+
+	DPrintNew("Raft side  %d Install: args.PrevIndex: %d, len: %d, lastIncludedIndex: %d, persist size: %d", rf.me, args.PrevLogIndex, len(rf.Slog), rf.LastIncludedIndex, rf.GetPersistSize())
+
+	var term int
+	if args.PrevLogIndex == rf.LastIncludedIndex {
+		term = rf.LastIncludedTerm
+	} else {
+		term = rf.Slog[args.PrevLogIndex-rf.LastIncludedIndex].Term
+	}
+
 	if args.PrevLogIndex > 0 && // > 0??
-		rf.Slog[args.PrevLogIndex-rf.LastIncludedIndex].Term != args.PrevLogTerm {
+		//rf.Slog[args.PrevLogIndex-rf.LastIncludedIndex].Term != args.PrevLogTerm {
+		term != args.PrevLogTerm {
 		reply.CTerm = rf.CurrentTerm
 		reply.Success = false
 
 		if rf.OptimizeMultipleEntries == 1 {
-			term := rf.Slog[args.PrevLogIndex-rf.LastIncludedIndex].Term
+			//term := rf.Slog[args.PrevLogIndex-rf.LastIncludedIndex].Term
 
+			//for reply.NextTryIndex = args.PrevLogIndex - 1; reply.NextTryIndex > 0 && rf.Slog[reply.NextTryIndex-rf.LastIncludedIndex].Term == term; reply.NextTryIndex-- {
+			//}
+
+			//DPrintNew("Raft side  %d Install: NextTryIndex: %d, len: %d, lastIncludedIndex: %d, persist size: %d", rf.me, args.PrevLogIndex-1, len(rf.Slog), rf.LastIncludedIndex, rf.GetPersistSize())
 			for reply.NextTryIndex = args.PrevLogIndex - 1; reply.NextTryIndex > 0 && rf.Slog[reply.NextTryIndex-rf.LastIncludedIndex].Term == term; reply.NextTryIndex-- {
+				//	DPrintNew("Raft side  %d Install: NextTryIndex: %d, len: %d, lastIncludedIndex: %d, persist size: %d", rf.me, reply.NextTryIndex, len(rf.Slog), rf.LastIncludedIndex, rf.GetPersistSize())
 			}
+			// for reply.NextTryIndex = args.PrevLogIndex - 1; reply.NextTryIndex > 0; reply.NextTryIndex-- {
+			// 	if rf.Slog[reply.NextTryIndex-rf.LastIncludedIndex].Term == term {
+			// 		//reply.NextTryIndex--
+			// 		break
+			// 	}
+			// 	if reply.NextTryIndex == rf.LastIncludedIndex && rf.LastIncludedTerm == term {
+			// 		//reply.NextTryIndex--
+			// 		break
+			// 	}
+			// }
 
 			reply.NextTryIndex++
 			//reply.NextTryIndex = rf.GetLastLogIndex() + 1. wrong, else Test (2B): rejoin of partitioned leader
@@ -475,6 +597,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	if args.LeaderCommit > rf.CommitIndex {
 		rf.CommitIndex = Min(args.LeaderCommit, rf.GetLastLogIndex())
+
+		//DPrintNew("Server %d, args.LeaderCommit %d, rf.GetLastLogIndex() %d", rf.me, args.LeaderCommit, rf.GetLastLogIndex())
 		//rf.applyCh <- ApplyMsg{Command: rf.Slog[rf.CommitIndex].Command, CommandIndex: rf.CommitIndex, CommandValid: true}
 		//if rf.LastApplied < rf.CommitIndex {
 		//	rf.LastApplied = rf.CommitIndex
@@ -557,6 +681,7 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 		rf.NextIndex[server] = rf.MatchIndex[server] + 1              // not rf.NextIndex[server]++
 
 		for N := rf.GetLastLogIndex(); N > rf.CommitIndex; N-- {
+			DPrintNew("Raft side  %d sendAppEntries: N : %d, len: %d, lastIncludedIndex: %d, commit index: %d, persist size: %d,", rf.me, N, len(rf.Slog), rf.LastIncludedIndex, rf.CommitIndex, rf.GetPersistSize())
 			if rf.Slog[N-rf.LastIncludedIndex].Term == rf.CurrentTerm {
 				majorityN := 1
 				for j := 0; j < len(rf.peers); j++ {
@@ -825,22 +950,35 @@ func Make(peers []*labrpc.ClientEnd, me int,
 							//modified by other case
 							//rf.mu.Lock()
 							//DPrintfB("Me: %d (Term %d, loglen %d), send to %d, PrevLogIndex: %d", rf.me, rf.CurrentTerm, len(rf.Slog), i, rf.GetPrevLogIndex(i))
-							DPrintNew("Me: %d (Term %d, loglen %d), send to %d, PrevLogIndex: %d, NextIndex: %d, lastincludedIndex: %d", rf.me, rf.CurrentTerm, len(rf.Slog), i, rf.GetPrevLogIndex(i), rf.NextIndex[i], rf.LastIncludedIndex)
+							DPrintNew("Me: %d (Term %d, loglen %d), send to %d, PrevLogIndex: %d, NextIndex: %d, lastincludedIndex: %d, commitIdx %d", rf.me, rf.CurrentTerm, len(rf.Slog), i, rf.GetPrevLogIndex(i), rf.NextIndex[i], rf.LastIncludedIndex, rf.CommitIndex)
+							if rf.NextIndex[i] > rf.LastIncludedIndex {
+								args := &AppendEntriesArgs{Term: rf.CurrentTerm,
+									LeaderId:     rf.me,
+									PrevLogIndex: rf.GetPrevLogIndex(i),
+									PrevLogTerm:  rf.GetPrevLogTerm(i), //rf.Slog[rf.NextIndex[i]-1-rf.LastIncludedIndex].Term, //rf.GetPrevLogTerm(i), //rf.Slog[len(rf.Slog)-1].Term,
+									Entries:      nil,                  //heartbeat empty
+									LeaderCommit: rf.CommitIndex,
+								}
+								//if rf.NextIndex[i]-1 == rf.LastIncludedIndex {
+								//	args.PrevLogTerm = rf.LastIncludedTerm
+								//}
 
-							args := &AppendEntriesArgs{Term: rf.CurrentTerm,
-								LeaderId:     rf.me,
-								PrevLogIndex: rf.GetPrevLogIndex(i),
-								PrevLogTerm:  rf.Slog[rf.NextIndex[i]-1-rf.LastIncludedIndex].Term, //rf.GetPrevLogTerm(i), //rf.Slog[len(rf.Slog)-1].Term,
-								Entries:      nil,                                                  //heartbeat empty
-								LeaderCommit: rf.CommitIndex,
+								//fmt.Println(rf.NextIndex[i], len(rf.Slog))
+								if rf.NextIndex[i] <= rf.GetLastLogIndex() {
+									args.Entries = rf.Slog[rf.NextIndex[i]-rf.LastIncludedIndex:]
+								}
+								//rf.mu.Unlock()
+								go rf.sendAppendEntries(i, args, &AppendEntriesReply{})
+							} else {
+								args := &InstallSnapShotArgs{
+									Term:              rf.CurrentTerm,
+									LeadId:            rf.me,
+									LastIncludedIndex: rf.LastIncludedIndex,
+									LastIncludedTerm:  rf.LastIncludedTerm,
+									Data:              rf.persister.snapshot,
+								}
+								go rf.SendInstallSnapShot(i, args, &InstallSnapShotReply{})
 							}
-
-							//fmt.Println(rf.NextIndex[i], len(rf.Slog))
-							if rf.NextIndex[i] <= rf.GetLastLogIndex() {
-								args.Entries = rf.Slog[rf.NextIndex[i]-rf.LastIncludedIndex:]
-							}
-							//rf.mu.Unlock()
-							go rf.sendAppendEntries(i, args, &AppendEntriesReply{})
 						}
 					}
 					rf.mu.Unlock()

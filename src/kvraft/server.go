@@ -16,7 +16,7 @@ const Debug4 = 0
 const Debug5 = 0
 const MixServer = 1
 const Conservative = 0
-const DebugNew = 1
+const DebugNew = 0
 
 func DPrintf4(format string, a ...interface{}) (n int, err error) {
 	if Debug4 > 0 {

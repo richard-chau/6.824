@@ -98,6 +98,10 @@ func (kv *KVServer) FilterSnum(cid int64, snum int) bool {
 }
 
 func (kv *KVServer) WHLog(op Op) bool {
+	//start := time.Now()
+
+	var flag bool
+
 	index, _, isLeader := kv.rf.Start(op)
 	//WaitTimeout := time.Duration(1200) * time.Millisecond
 	if isLeader {
@@ -111,9 +115,13 @@ func (kv *KVServer) WHLog(op Op) bool {
 		}
 		kv.mu.Unlock()
 
+		//elapsed := time.Since(start)
+		//log.Printf("break point took %s", elapsed)
+
 		select {
 		case opChan := <-notifyChan: //kv.notify[index]: //notifyChan:
-			return opChan == op
+			//return opChan == op
+			flag = (opChan == op)
 			//if opChan != op {
 			//	log.Println(opChan, op)
 			//}
@@ -122,11 +130,16 @@ func (kv *KVServer) WHLog(op Op) bool {
 			//	return false
 			//}
 		case <-time.After(800 * time.Millisecond): //network partition, is leader, but cannot commit
-			return false // 200 is okay in this setting
+			//return false // 200 is okay in this setting
+			flag = false
 		}
 	} else { //not leader, or maybe is leader and commit but just get off when recv applyChan
-		return false
+		//return false
+		flag = false
 	}
+
+	//log.Printf("WHLOG took %s", time.Since(start))
+	return flag
 }
 
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
@@ -200,6 +213,7 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 
 func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	// Your code here.
+	//start := time.Now()
 
 	if kv.rf.State != 1 {
 		reply.WrongLeader = true
@@ -228,9 +242,20 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 		return
 	}
 
+	// elapsed := time.Since(start)
+	// log.Printf("zero took %s", elapsed)
+	// start4 := time.Now()
+
 	op := Op{Optype: args.Op, Key: args.Key, Value: args.Value, Snum: args.Snum, Cid: args.Cid}
+
+	// elapsed4 := time.Since(start4)
+	// log.Printf("first took %s", elapsed4)
+	// start5 := time.Now()
 	DPrintf5("%d Appended from %d, Key: %v, snum: %d", kv.me, args.Cid, args.Key, args.Snum)
 	success := kv.WHLog(op)
+
+	// elapsed5 := time.Since(start5)
+	// log.Printf("after WHLOG took %s", elapsed5)
 
 	if success {
 		//var exist bool
@@ -304,7 +329,7 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
 	go func() {
-		DPrintNew("start listening %d", kv.me)
+
 		for { //m := range kv.applyCh {
 			m := <-kv.applyCh
 			if m.UseSnapshot {
@@ -324,7 +349,9 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 				kv.mu.Unlock()
 				continue
 			}
-
+			if kv.rf.State == 1 {
+				DPrintNew("I am the leader %d", kv.me)
+			}
 			//do get / append / put
 			DPrintf5("server %d received applych", kv.me)
 			op := m.Command.(Op)

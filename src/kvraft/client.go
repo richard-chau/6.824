@@ -1,8 +1,10 @@
 package raftkv
 
-import "labrpc"
-import "crypto/rand"
-import "math/big"
+import (
+	"crypto/rand"
+	"labrpc"
+	"math/big"
+)
 
 type Clerk struct {
 	servers []*labrpc.ClientEnd
@@ -129,6 +131,7 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 
 	//leaderTry := ck.lastLeader
 	for {
+		//log.Printf("Leaderid: %d", ck.lastLeader)
 		reply = PutAppendReply{}
 
 		ok := ck.servers[ck.lastLeader].Call("KVServer.PutAppend", args, &reply)
@@ -141,6 +144,7 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 		}
 
 		if !reply.WrongLeader {
+			//log.Printf("Success Leaderid: %d", ck.lastLeader)
 			//REM: possible reply.leader op in paper
 			//ck.lastLeader = leaderTry
 			break

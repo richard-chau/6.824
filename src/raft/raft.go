@@ -86,6 +86,7 @@ type Raft struct {
 	RequestVoteChan   (chan bool)
 	AppendEntriesChan (chan bool)
 	ElectWin          (chan bool)
+	StartServiceChan  (chan bool)
 	succeesNum        int
 
 	OptimizeMultipleEntries int
@@ -138,12 +139,12 @@ func (rf *Raft) InstallSnapShot(args *InstallSnapShotArgs, reply *InstallSnapSho
 
 	//rf.CurrentTerm = args.Term
 	trueIdx := args.LastIncludedIndex
-	if trueIdx+1 < rf.LastIncludedIndex {
+	if trueIdx+1 <= rf.LastIncludedIndex { // not <, simply return
 		return
 	}
 
 	var newSlog []SLogEntry
-	newSlog = append(newSlog, SLogEntry{Term: args.LastIncludedTerm, Command: nil}) //change 0 to args.LastIncludedTerm
+	newSlog = append(newSlog, SLogEntry{Term: args.LastIncludedTerm, Command: "----------------------------------"}) //change 0 to args.LastIncludedTerm
 	//for i := idx - rf.LastIncludedIndex; i >= 1; i-- {
 	//}
 
@@ -209,8 +210,8 @@ func (rf *Raft) SendInstallSnapShot(server int, args *InstallSnapShotArgs, reply
 func (rf *Raft) DoSnapshot(ckp []byte, trueIdx int) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-
-	if rf.LastIncludedIndex >= trueIdx {
+	if rf.LastIncludedIndex >= trueIdx || rf.LastApplied < trueIdx {
+		//if rf.LastIncludedIndex >= trueIdx || rf.LastApplied < trueIdx { //add the second condition
 		return
 	}
 
@@ -218,7 +219,7 @@ func (rf *Raft) DoSnapshot(ckp []byte, trueIdx int) {
 
 	var newSlog []SLogEntry
 	rf.LastIncludedTerm = rf.Slog[trueIdx-rf.LastIncludedIndex].Term
-	newSlog = append(newSlog, SLogEntry{Term: rf.LastIncludedTerm, Command: nil})
+	newSlog = append(newSlog, SLogEntry{Term: rf.LastIncludedTerm, Command: "----------------------------------"})
 	//for i := idx - rf.LastIncludedIndex; i >= 1; i-- {
 	//}
 	//if trueIdx+1-rf.LastIncludedIndex < len(rf.Slog) {
@@ -739,7 +740,15 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 func (rf *Raft) commitlog() {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+
+	//for i := rf.LastApplied + 1; i <= rf.CommitIndex; i++ {
+	//for i := rf.LastApplied + 1; i <= rf.CommitIndex && i > rf.LastIncludedIndex; i++ {
+	//log.Printf("Me: %d Commit log: %d, %d, %d", rf.me, i, rf.LastIncludedIndex, len(rf.Slog), rf.Slog[i-rf.LastIncludedIndex].Command, rf.Slog[i-rf.LastIncludedIndex].Term)
+
+	//}
 	for i := rf.LastApplied + 1; i <= rf.CommitIndex; i++ {
+		//for i := rf.LastApplied + 1; i <= rf.CommitIndex && i > rf.LastIncludedIndex; i++ {
+		//log.Printf("me: %d Commit log: %d, %d, %d, %d", rf.me, i, rf.LastIncludedIndex, i-rf.LastIncludedIndex, len(rf.Slog))
 		rf.applyCh <- ApplyMsg{Command: rf.Slog[i-rf.LastIncludedIndex].Command, CommandIndex: i, CommandValid: true}
 	}
 	rf.LastApplied = rf.CommitIndex
@@ -776,6 +785,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	//rf.mu.Lock()
 	rf.command = command
 	//commandInt, _ := command.(int)
+	//log.Println("%v", command)
 	rf.Slog = append(rf.Slog, SLogEntry{Term: rf.CurrentTerm, Command: command})
 	//REM: respond after entry applied to state machine
 	index = rf.GetLastLogIndex() //rf.GetLastLogIndex() + 1 //
@@ -786,6 +796,55 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 
 	term = rf.CurrentTerm
 	isLeader = (rf.State == 1)
+
+	if rf.State != 1 {
+		return index, term, isLeader
+	}
+	//if rf.State == 1 {
+	//	rf.StartServiceChan <- true
+	//}
+
+	go func() {
+		//time.Sleep(15 * time.Millisecond)
+		rf.mu.Lock()
+		for i := 0; i < len(rf.peers); i++ {
+			if i != rf.me && rf.State == 1 { //rf.State may be
+				//modified by other case
+				//rf.mu.Lock()
+				//DPrintfB("Me: %d (Term %d, loglen %d), send to %d, PrevLogIndex: %d", rf.me, rf.CurrentTerm, len(rf.Slog), i, rf.GetPrevLogIndex(i))
+				DPrintNew("Me: %d (Term %d, loglen %d), send to %d, PrevLogIndex: %d, NextIndex: %d, lastincludedIndex: %d, commitIdx %d", rf.me, rf.CurrentTerm, len(rf.Slog), i, rf.GetPrevLogIndex(i), rf.NextIndex[i], rf.LastIncludedIndex, rf.CommitIndex)
+				if rf.NextIndex[i] > rf.LastIncludedIndex {
+					args := &AppendEntriesArgs{Term: rf.CurrentTerm,
+						LeaderId:     rf.me,
+						PrevLogIndex: rf.GetPrevLogIndex(i),
+						PrevLogTerm:  rf.GetPrevLogTerm(i), //rf.Slog[rf.NextIndex[i]-1-rf.LastIncludedIndex].Term, //rf.GetPrevLogTerm(i), //rf.Slog[len(rf.Slog)-1].Term,
+						Entries:      nil,                  //heartbeat empty
+						LeaderCommit: rf.CommitIndex,
+					}
+					//if rf.NextIndex[i]-1 == rf.LastIncludedIndex {
+					//	args.PrevLogTerm = rf.LastIncludedTerm
+					//}
+
+					//fmt.Println(rf.NextIndex[i], len(rf.Slog))
+					if rf.NextIndex[i] <= rf.GetLastLogIndex() {
+						args.Entries = rf.Slog[rf.NextIndex[i]-rf.LastIncludedIndex:]
+					}
+					//rf.mu.Unlock()
+					go rf.sendAppendEntries(i, args, &AppendEntriesReply{})
+				} else {
+					args := &InstallSnapShotArgs{
+						Term:              rf.CurrentTerm,
+						LeadId:            rf.me,
+						LastIncludedIndex: rf.LastIncludedIndex,
+						LastIncludedTerm:  rf.LastIncludedTerm,
+						Data:              rf.persister.snapshot,
+					}
+					go rf.SendInstallSnapShot(i, args, &InstallSnapShotReply{})
+				}
+			}
+		}
+		rf.mu.Unlock()
+	}()
 	return index, term, isLeader
 }
 
@@ -865,6 +924,8 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.RequestVoteChan = make(chan bool)
 	rf.AppendEntriesChan = make(chan bool)
 	rf.ElectWin = make(chan bool)
+
+	rf.StartServiceChan = make(chan bool, 1000)
 
 	rf.OptimizeMultipleEntries = 1
 
@@ -957,6 +1018,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 				}
 			case 1:
 				{
+
 					rf.mu.Lock()
 					for i := 0; i < len(rf.peers); i++ {
 						if i != rf.me && rf.State == 1 { //rf.State may be
@@ -999,7 +1061,16 @@ func Make(peers []*labrpc.ClientEnd, me int,
 					//but one more case: in RPC request or response
 					//if T > cT, will set to follower -1 directly
 					//but here  && rf.State == 1  can avoid error
+
 					time.Sleep(HeartBeatTimeout)
+
+					// select {
+					// case <-time.After(HeartBeatTimeout):
+					// 	continue
+					// case <-rf.StartServiceChan:
+					// 	time.Sleep(HeartBeatTimeout / 8)
+					// 	continue
+					// }
 				}
 			}
 		}

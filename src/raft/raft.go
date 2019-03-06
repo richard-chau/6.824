@@ -175,15 +175,15 @@ func (rf *Raft) InstallSnapShot(args *InstallSnapShotArgs, reply *InstallSnapSho
 	e1 := labgob.NewEncoder(w1)
 	e1.Encode(rf.LastIncludedIndex)
 	e1.Encode(rf.LastIncludedTerm)
-	data1 := w1.Bytes()
-	data1 = append(data1, args.Data...) ///
+	//data1 := w1.Bytes()
+	//data1 = append(data1, args.Data...) ///
 
-	rf.persister.SaveStateAndSnapshot(state, data1)
-
-	go func() {
-		rf.applyCh <- msg
-	}()
-
+	//rf.persister.SaveStateAndSnapshot(state, data1)
+	rf.persister.SaveStateAndSnapshot(state, args.Data)
+	//go func() {
+	//	rf.applyCh <- msg
+	//}()
+	rf.applyCh <- msg
 }
 
 func (rf *Raft) SendInstallSnapShot(server int, args *InstallSnapShotArgs, reply *InstallSnapShotReply) bool {

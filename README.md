@@ -8,8 +8,12 @@ Finished:
 
 Lab1 
 
-Lab2A, 2B[49s], 2C[139s]
+Lab2A [Blog](https://ricwithyou.blogspot.com/2019/01/chinese-6824-lab-2-1.html)
 
-Lab3A
+Lab2B[49s] [Blog](https://ricwithyou.blogspot.com/2019/01/6824-lab-2-2.html)
 
-TODO: 3B 
+Lab2C[139s] 
+
+Lab3A[211s] [Blog](https://ricwithyou.blogspot.com/2019/02/6824-lab-3-1-fault-tolerant-keyvalue.html)
+
+Lab3B[130s] [Blog](https://ricwithyou.blogspot.com/2019/03/6824-lab-3-2-keyvalue-service-with-log.html)
